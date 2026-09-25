@@ -78,16 +78,13 @@ public final class ResetQueue {
         if (worldReset) {
             return;
         }
-        int radius = plugin.settings().clearRadius();
-        int cx = active.id * 2000;
-        int cy = plugin.settings().pillarY();
-        int half = plugin.settings().clearHeight() / 2;
-        minX = cx - radius;
-        maxX = cx + radius;
-        minZ = -radius;
-        maxZ = radius;
-        minY = Math.max(0, cy - half);
-        maxY = Math.min(world.getMaxHeight() - 1, cy + half);
+        int radius = plugin.settings().resetReach();
+        minX = active.centerX - radius;
+        maxX = active.centerX + radius;
+        minZ = active.centerZ - radius;
+        maxZ = active.centerZ + radius;
+        minY = 0;
+        maxY = world.getMaxHeight() - 1;
         int cx0 = minX >> 4;
         int cx1 = maxX >> 4;
         int cz0 = minZ >> 4;
@@ -164,9 +161,12 @@ public final class ResetQueue {
     }
 
     private void removeEntities(World world) {
-        int radius = plugin.settings().clearRadius();
-        int height = plugin.settings().clearHeight();
-        Location center = new Location(world, active.id * 2000.0, plugin.settings().pillarY(), 0);
+        int radius = plugin.settings().resetReach();
+        Location center = active.centerAt(plugin.settings().pillarY());
+        if (center == null) {
+            return;
+        }
+        double height = world.getMaxHeight();
         for (Entity entity : world.getNearbyEntities(center, radius + 1.0, height, radius + 1.0)) {
             if (!(entity instanceof Player)) {
                 entity.remove();

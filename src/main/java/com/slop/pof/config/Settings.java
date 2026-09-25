@@ -1,6 +1,7 @@
 package com.slop.pof.config;
 
 import org.bukkit.GameMode;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import com.slop.pof.util.Text;
 
@@ -20,6 +21,8 @@ public final class Settings {
     private final int arenaCount;
     private final String resetMode;
     private final int resetBlocksPerTick;
+    private final int arenaSpacing;
+    private final int resetRadius;
     private final int pillarCount;
     private final int pillarRadius;
     private final int pillarHeight;
@@ -42,13 +45,14 @@ public final class Settings {
     private final int maxGameSeconds;
     private final GameMode lobbyGamemode;
     private final double fireballSpeed;
-    private final double fireballAccel;
     private final double fireballKnockX;
     private final double fireballKnockY;
     private final double fireballRadius;
     private final double fireballCooldown;
     private final double fireballDamageSelf;
     private final double fireballDamageEnemy;
+    private final boolean fireballFire;
+    private final double fireballYield;
     private final int blockMin;
     private final int blockMax;
     private final int pearlChance;
@@ -80,6 +84,15 @@ public final class Settings {
     private final List<String> blocks;
     private final List<String> chaos;
     private final List<String> illegal;
+    private final int defaultAmount;
+    private final Map<String, String> itemAmounts;
+    private final Map<String, Integer> itemChances;
+    private final Map<String, Integer> enchantKeepByItem;
+    private final Map<String, List<String>> itemEnchants;
+    private final String fallbackWeapons;
+    private final String fallbackArmor;
+    private final String fallbackBlocks;
+    private final String fallbackChaos;
 
     private Settings(FileConfiguration c) {
         prefix = c.getString("prefix", "&8[&6PoF&8]&r");
@@ -90,6 +103,8 @@ public final class Settings {
         arenaCount = Math.max(1, c.getInt("arenas.count", 6));
         resetMode = c.getString("arenas.reset-mode", "region");
         resetBlocksPerTick = Math.max(1, c.getInt("arenas.reset-blocks-per-tick", 8000));
+        arenaSpacing = Math.max(1, c.getInt("arenas.spacing", 2000));
+        resetRadius = Math.max(1, c.getInt("arenas.reset-radius", 128));
         pillarCount = Math.max(1, c.getInt("pillars.count", 12));
         pillarRadius = c.getInt("pillars.radius", 20);
         pillarHeight = Math.max(1, c.getInt("pillars.height", 45));
@@ -111,18 +126,19 @@ public final class Settings {
         endSeconds = Math.max(1, c.getInt("end-seconds", 8));
         maxGameSeconds = Math.max(1, c.getInt("max-game-seconds", 600));
         lobbyGamemode = parseMode(c.getString("lobby-gamemode", "ADVENTURE"));
-        fireballSpeed = c.getDouble("fireball.speed", 10.0);
-        fireballAccel = c.getDouble("fireball.accel", 0.1);
-        fireballKnockX = c.getDouble("fireball.knockback-x", 1.15);
-        fireballKnockY = c.getDouble("fireball.knockback-y", 0.75);
-        fireballRadius = c.getDouble("fireball.radius", 3.0);
+        fireballSpeed = c.getDouble("fireball.speed", 1.6);
+        fireballKnockX = c.getDouble("fireball.knockback-horizontal", c.getDouble("fireball.knockback-x", 2.6));
+        fireballKnockY = c.getDouble("fireball.knockback-vertical", c.getDouble("fireball.knockback-y", 1.1));
+        fireballRadius = c.getDouble("fireball.radius", 3.5);
         fireballCooldown = c.getDouble("fireball.cooldown", 0.5);
-        fireballDamageSelf = c.getDouble("fireball.damage-self", 0.5);
+        fireballDamageSelf = c.getDouble("fireball.damage-self", 2.0);
         fireballDamageEnemy = c.getDouble("fireball.damage-enemy", 2.0);
+        fireballFire = c.getBoolean("fireball.fire", false);
+        fireballYield = c.getDouble("fireball.yield", 2.0);
         blockMin = c.getInt("block-min", 4);
         blockMax = c.getInt("block-max", 12);
         pearlChance = c.getInt("pearl-chance", 15);
-        enchantKeepChance = c.getInt("enchant-keep-chance", 12);
+        enchantKeepChance = c.getInt("items.enchant-keep-chance", c.getInt("enchant-keep-chance", 12));
         rateWeapons = c.getInt("rates.weapons", 8);
         rateArmor = c.getInt("rates.armor", 7);
         rateBlocks = c.getInt("rates.blocks", 72);
@@ -150,6 +166,15 @@ public final class Settings {
         blocks = list(c, "items.blocks");
         chaos = list(c, "items.chaos");
         illegal = list(c, "items.illegal");
+        defaultAmount = Math.max(1, c.getInt("items.default-amount", 1));
+        itemAmounts = normalizeKeys(readSection(c, "items.amounts"));
+        itemChances = readInts(c, "items.chances");
+        enchantKeepByItem = readInts(c, "items.enchant-keep");
+        itemEnchants = readNamedLists(c, "items.enchants");
+        fallbackWeapons = c.getString("items.enchant-fallback.weapons", "WOOD_SWORD");
+        fallbackArmor = c.getString("items.enchant-fallback.armor", "LEATHER_HELMET");
+        fallbackBlocks = c.getString("items.enchant-fallback.blocks", "COBBLESTONE");
+        fallbackChaos = c.getString("items.enchant-fallback.chaos", "COBBLESTONE");
     }
 
     public static Settings from(FileConfiguration config) {
@@ -172,6 +197,22 @@ public final class Settings {
 
     public String worldSignature() {
         return gameWorld + "|" + resetMode + "|" + lobbyWorld;
+    }
+
+    public String layoutSignature() {
+        return arenaSpacing + "/" + resetRadius + "/" + buildRadius + "/" + borderKill + "/" + clearRadius;
+    }
+
+    /** Box half-size used when an arena is wiped. Always larger than the playable arena. */
+    public int resetReach() {
+        int play = Math.max(buildRadius, Math.max(Math.abs(borderKill), Math.max(clearRadius, pillarRadius + 4)));
+        return Math.max(resetRadius, play + 16);
+    }
+
+    /** Distance between arena centers. Never small enough for two reset boxes to overlap. */
+    public int arenaSpacing() {
+        int min = resetReach() * 2 + 32;
+        return Math.max(min, arenaSpacing);
     }
 
     public boolean worldPerArena() {
@@ -228,6 +269,42 @@ public final class Settings {
             map.put(key, c.getString(path + "." + key, ""));
         }
         return map;
+    }
+
+    private static Map<String, String> normalizeKeys(Map<String, String> raw) {
+        Map<String, String> out = new HashMap<>();
+        for (Map.Entry<String, String> entry : raw.entrySet()) {
+            out.put(key(entry.getKey()), entry.getValue());
+        }
+        return out;
+    }
+
+    private static Map<String, Integer> readInts(FileConfiguration c, String path) {
+        Map<String, Integer> out = new HashMap<>();
+        ConfigurationSection section = c.getConfigurationSection(path);
+        if (section == null) {
+            return out;
+        }
+        for (String name : section.getKeys(false)) {
+            out.put(key(name), section.getInt(name));
+        }
+        return out;
+    }
+
+    private static Map<String, List<String>> readNamedLists(FileConfiguration c, String path) {
+        Map<String, List<String>> out = new HashMap<>();
+        ConfigurationSection section = c.getConfigurationSection(path);
+        if (section == null) {
+            return out;
+        }
+        for (String name : section.getKeys(false)) {
+            out.put(key(name), List.copyOf(section.getStringList(name)));
+        }
+        return out;
+    }
+
+    private static String key(String raw) {
+        return raw.trim().toUpperCase(Locale.ROOT).replace(' ', '_').replace('-', '_');
     }
 
     private static List<String> list(FileConfiguration c, String path) {
@@ -299,13 +376,23 @@ public final class Settings {
     public int maxGameSeconds() { return maxGameSeconds; }
     public GameMode lobbyGamemode() { return lobbyGamemode; }
     public double fireballSpeed() { return fireballSpeed; }
-    public double fireballAccel() { return fireballAccel; }
     public double fireballKnockX() { return fireballKnockX; }
     public double fireballKnockY() { return fireballKnockY; }
     public double fireballRadius() { return fireballRadius; }
     public double fireballCooldown() { return fireballCooldown; }
     public double fireballDamageSelf() { return fireballDamageSelf; }
     public double fireballDamageEnemy() { return fireballDamageEnemy; }
+    public boolean fireballFire() { return fireballFire; }
+    public double fireballYield() { return fireballYield; }
+    public int defaultAmount() { return defaultAmount; }
+    public String amountSpec(String materialName) { return itemAmounts.get(materialName); }
+    public int chanceFor(String materialName, int fallback) { return itemChances.getOrDefault(materialName, fallback); }
+    public int enchantKeepFor(String materialName) { return enchantKeepByItem.getOrDefault(materialName, enchantKeepChance); }
+    public List<String> enchantsFor(String materialName) { return itemEnchants.getOrDefault(materialName, List.of()); }
+    public String fallbackWeapons() { return fallbackWeapons; }
+    public String fallbackArmor() { return fallbackArmor; }
+    public String fallbackBlocks() { return fallbackBlocks; }
+    public String fallbackChaos() { return fallbackChaos; }
     public int blockMin() { return blockMin; }
     public int blockMax() { return blockMax; }
     public int pearlChance() { return pearlChance; }

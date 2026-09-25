@@ -1,6 +1,5 @@
 package com.slop.pof.arena;
 
-import org.bukkit.World;
 import com.slop.pof.PoFPlugin;
 
 import java.util.ArrayList;
@@ -14,16 +13,20 @@ public final class Arenas {
     private final Pillars pillars;
     private final Map<Integer, Arena> arenas = new LinkedHashMap<>();
     private String pillarSignature;
+    private String layoutSignature;
 
     public Arenas(PoFPlugin plugin, Pillars pillars) {
         this.plugin = plugin;
         this.pillars = pillars;
         this.pillarSignature = plugin.settings().pillarSignature();
+        this.layoutSignature = plugin.settings().layoutSignature();
     }
 
     public void createAll(int count) {
         for (int id = 1; id <= count; id++) {
-            create(id);
+            if (create(id) == null) {
+                break;
+            }
         }
     }
 
@@ -53,9 +56,16 @@ public final class Arenas {
         String nextPillars = plugin.settings().pillarSignature();
         for (int id = 1; id <= want; id++) {
             if (!arenas.containsKey(id)) {
-                create(id);
-                plugin.resets().enqueue(arenas.get(id));
+                Arena created = create(id);
+                if (created == null) {
+                    break;
+                }
+                plugin.resets().enqueue(created);
             }
+        }
+        if (!plugin.settings().layoutSignature().equals(layoutSignature)) {
+            layoutSignature = plugin.settings().layoutSignature();
+            restart = true;
         }
         List<Integer> ids = new ArrayList<>(arenas.keySet());
         for (int id : ids) {
@@ -82,12 +92,22 @@ public final class Arenas {
         return restart;
     }
 
-    private void create(int id) {
-        Arena arena = new Arena(id);
-        World world = plugin.worlds().world(id);
-        arena.world = world;
+    private Arena create(int id) {
+        int reach = plugin.settings().resetReach();
+        int spacing = plugin.settings().arenaSpacing();
+        int[] step = ArenaLayout.steps(id - 1);
+        int centerX = step[0] * spacing;
+        int centerZ = step[1] * spacing;
+        if (!ArenaLayout.inside(centerX, centerZ, reach)) {
+            plugin.getLogger().warning("Arena " + id + " at " + centerX + ", " + centerZ
+                    + " would leave the vanilla world border, so it was not created.");
+            return null;
+        }
+        Arena arena = new Arena(id, centerX, centerZ);
+        arena.world = plugin.worlds().world(id);
         pillars.build(arena);
         arena.state = Arena.State.WAITING;
         arenas.put(id, arena);
+        return arena;
     }
 }

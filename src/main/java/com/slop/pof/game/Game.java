@@ -655,9 +655,12 @@ public final class Game {
         if (arena.world == null) {
             return;
         }
-        int radius = plugin.settings().clearRadius();
-        Location center = new Location(arena.world, arena.id * 2000.0, plugin.settings().pillarY(), 0);
-        for (org.bukkit.entity.Entity entity : arena.world.getNearbyEntities(center, radius, plugin.settings().clearHeight(), radius)) {
+        int radius = plugin.settings().resetReach();
+        Location center = arena.centerAt(plugin.settings().pillarY());
+        if (center == null) {
+            return;
+        }
+        for (org.bukkit.entity.Entity entity : arena.world.getNearbyEntities(center, radius, arena.world.getMaxHeight(), radius)) {
             if (!(entity instanceof Player)) {
                 entity.remove();
             }
@@ -685,10 +688,7 @@ public final class Game {
     }
 
     private Location center(Arena arena) {
-        if (arena.world == null) {
-            return null;
-        }
-        return new Location(arena.world, arena.id * 2000.0, plugin.settings().pillarY(), 0);
+        return arena.centerAt(plugin.settings().pillarY());
     }
 
     private String nameOf(UUID uuid) {

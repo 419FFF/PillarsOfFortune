@@ -67,15 +67,15 @@ public final class PoFListener implements Listener {
         if (!(event.getEntity() instanceof Player victim)) {
             return;
         }
-        if (isExplosion(event.getCause()) && plugin.fireballs().systemActive()) {
-            event.setCancelled(true);
-            return;
-        }
         if (event instanceof EntityDamageByEntityEvent by) {
             if (by.getDamager() instanceof Fireball fireball && plugin.fireballs().isOurs(fireball)) {
                 event.setCancelled(true);
                 return;
             }
+        }
+        if (isExplosion(event.getCause()) && plugin.fireballs().ignoreExplosion(victim.getUniqueId())) {
+            event.setCancelled(true);
+            return;
         }
         Arena arena = plugin.game().arena(victim);
         if (arena == null || arena.state != Arena.State.INGAME || !plugin.game().isAlive(victim)) {
@@ -136,10 +136,12 @@ public final class PoFListener implements Listener {
         Game.Session session = plugin.game().session(player);
         Arena arena = session.arenaId == 0 ? null : plugin.arenas().get(session.arenaId);
         if (arena != null && !session.alive && arena.world != null) {
-            Location center = new Location(arena.world, arena.id * 2000.0, plugin.settings().pillarY(), 0);
-            event.setRespawnLocation(center);
+            Location center = arena.centerAt(plugin.settings().pillarY());
+            if (center != null) {
+                event.setRespawnLocation(center);
+            }
             Bukkit.getScheduler().runTask(plugin, () -> {
-                if (!player.isOnline()) {
+                if (!player.isOnline() || center == null) {
                     return;
                 }
                 player.setGameMode(GameMode.SPECTATOR);
@@ -246,7 +248,11 @@ public final class PoFListener implements Listener {
             event.setCancelled(true);
             return;
         }
-        Location center = new Location(arena.world, arena.id * 2000.0, plugin.settings().pillarY(), 0);
+        Location center = arena.centerAt(plugin.settings().pillarY());
+        if (center == null) {
+            event.setCancelled(true);
+            return;
+        }
         double dx = Math.abs(player.getLocation().getX() - center.getX());
         double dz = Math.abs(player.getLocation().getZ() - center.getZ());
         if (dx > plugin.settings().buildRadius() || dz > plugin.settings().buildRadius()) {

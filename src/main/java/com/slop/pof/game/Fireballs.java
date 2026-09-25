@@ -9,28 +9,33 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.util.Vector;
 import com.slop.pof.PoFPlugin;
+import com.slop.pof.arena.Arena;
 import com.slop.pof.util.Text;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Hypixel / BedWars-style fire charges on the 1.8.8 API.
+ * The charge is launched along the player's look, then the hit applies one custom
+ * knockback (away from the blast, with an upward pop) and one custom damage hit.
+ * Vanilla fireball damage and explosion damage are cancelled so they are not applied twice.
+ */
 public final class Fireballs {
     public static final String OWNER = "pof-owner";
 
     private final PoFPlugin plugin;
     private final Set<Fireball> live = new HashSet<>();
-    private final java.util.Map<UUID, Long> cooldown = new java.util.HashMap<>();
+    private final Map<UUID, Long> cooldown = new HashMap<>();
+    private final Map<UUID, Long> explosionImmunity = new HashMap<>();
     private final Set<UUID> customDamage = new HashSet<>();
-    private boolean systemActive;
 
     public Fireballs(PoFPlugin plugin) {
         this.plugin = plugin;
-    }
-
-    public boolean systemActive() {
-        return systemActive;
     }
 
     public boolean isCustomDamage(UUID uuid) {
@@ -41,81 +46,100 @@ public final class Fireballs {
         return entity != null && entity.hasMetadata(OWNER);
     }
 
+    public boolean ignoreExplosion(UUID uuid) {
+        Long until = explosionImmunity.get(uuid);
+        if (until == null) {
+            return false;
+        }
+        if (until < System.currentTimeMillis()) {
+            explosionImmunity.remove(uuid);
+            return false;
+        }
+        return true;
+    }
+
     public void clearOwner(Entity entity) {
         if (entity != null && entity.hasMetadata(OWNER)) {
             entity.removeMetadata(OWNER, plugin);
         }
     }
 
+    /** Drops fireballs that already exploded or fell out of the world. */
     public void tick() {
         if (live.isEmpty()) {
             return;
         }
-        double accel = plugin.settings().fireballAccel();
         Iterator<Fireball> it = live.iterator();
         while (it.hasNext()) {
             Fireball fireball = it.next();
             if (fireball.isDead() || !fireball.isValid()) {
                 it.remove();
-                continue;
             }
-            Vector velocity = fireball.getVelocity();
-            if (velocity.lengthSquared() < 1.0E-6) {
-                continue;
-            }
-            velocity.add(velocity.clone().normalize().multiply(accel));
-            fireball.setVelocity(velocity);
         }
     }
 
     public void onHit(Fireball fireball) {
         live.remove(fireball);
-        Location loc = fireball.getLocation();
-        UUID owner = ownerOf(fireball);
-        double radius = plugin.settings().fireballRadius();
-        if (loc.getWorld() == null) {
+        Location blast = fireball.getLocation();
+        if (blast.getWorld() == null) {
             return;
         }
-        for (Entity entity : loc.getWorld().getNearbyEntities(loc, radius, radius, radius)) {
+        UUID owner = ownerOf(fireball);
+        double radius = plugin.settings().fireballRadius();
+        for (Entity entity : blast.getWorld().getNearbyEntities(blast, radius, radius, radius)) {
             if (!(entity instanceof Player player)) {
                 continue;
             }
             if (!plugin.game().isAlive(player)) {
                 continue;
             }
-            if (player.getLocation().distanceSquared(loc) > radius * radius) {
+            Arena arena = plugin.game().arena(player);
+            if (arena == null || arena.state != Arena.State.INGAME) {
                 continue;
             }
-            push(player, loc);
+            if (player.getLocation().distanceSquared(blast) > radius * radius) {
+                continue;
+            }
+            explosionImmunity.put(player.getUniqueId(), System.currentTimeMillis() + 400L);
+            Vector knockback = knockback(player, blast, radius);
             double damage = owner != null && owner.equals(player.getUniqueId())
                     ? plugin.settings().fireballDamageSelf()
                     : plugin.settings().fireballDamageEnemy();
-            if (damage <= 0) {
-                continue;
-            }
-            Player shooter = owner == null ? null : plugin.getServer().getPlayer(owner);
-            customDamage.add(player.getUniqueId());
-            try {
-                if (shooter != null) {
-                    player.damage(damage, shooter);
-                } else {
-                    player.damage(damage);
+            if (damage > 0) {
+                Player shooter = owner == null ? null : plugin.getServer().getPlayer(owner);
+                customDamage.add(player.getUniqueId());
+                try {
+                    if (shooter != null && !shooter.equals(player)) {
+                        player.damage(damage, shooter);
+                    } else {
+                        player.damage(damage);
+                    }
+                } finally {
+                    customDamage.remove(player.getUniqueId());
                 }
-            } finally {
-                customDamage.remove(player.getUniqueId());
             }
+            // 1.8 applies vanilla explosion velocity after this event. Set ours on the next tick.
+            plugin.getServer().getScheduler().runTask(plugin, () -> {
+                if (player.isOnline() && plugin.game().isAlive(player)) {
+                    player.setVelocity(knockback);
+                    player.setFallDistance(0f);
+                }
+            });
         }
     }
 
+    /**
+     * @return true when the click was handled (including a shot that is still on cooldown)
+     */
     public boolean tryShoot(Player player) {
-        UUID uuid = player.getUniqueId();
         if (!plugin.game().isAlive(player)) {
             return false;
         }
-        var arena = plugin.game().arena(player);
-        if (arena == null || arena.state != com.slop.pof.arena.Arena.State.INGAME) {
+        Arena arena = plugin.game().arena(player);
+        if (arena == null || arena.state != Arena.State.INGAME) {
             return false;
         }
+        UUID uuid = player.getUniqueId();
         long now = System.currentTimeMillis();
         Long until = cooldown.get(uuid);
         if (until != null && until > now) {
@@ -131,34 +155,49 @@ public final class Fireballs {
         } else {
             hand.setAmount(hand.getAmount() - 1);
         }
-        systemActive = true;
-        Vector direction = player.getEyeLocation().getDirection().normalize();
-        Fireball fireball = player.launchProjectile(Fireball.class);
-        fireball.setVelocity(direction.multiply(plugin.settings().fireballSpeed()));
+        Vector direction = player.getEyeLocation().getDirection();
+        if (direction.lengthSquared() < 1.0E-6) {
+            direction = new Vector(0, 0, 1);
+        }
+        direction.normalize();
+        Location spawnAt = player.getEyeLocation().add(direction.clone().multiply(1.2));
+        Fireball fireball = player.getWorld().spawn(spawnAt, Fireball.class);
+        fireball.setShooter(player);
+        // 1.8 uses direction for where the fireball travels. Velocity alone often aims upward.
+        fireball.setDirection(direction.clone());
+        fireball.setVelocity(direction.clone().multiply(plugin.settings().fireballSpeed()));
+        fireball.setIsIncendiary(plugin.settings().fireballFire());
+        fireball.setYield((float) plugin.settings().fireballYield());
         fireball.setMetadata(OWNER, new FixedMetadataValue(plugin, uuid.toString()));
         live.add(fireball);
         Text.sound(player, plugin.settings().sound("fireball", "mob.ghast.fireball"), 1f, 1.2f);
         return true;
     }
 
-    private void push(Player player, Location loc) {
-        double dx = player.getLocation().getX() - loc.getX();
-        double dz = player.getLocation().getZ() - loc.getZ();
-        Vector velocity = player.getVelocity();
-        double kx = plugin.settings().fireballKnockX();
-        double ky = plugin.settings().fireballKnockY();
-        if (dx > 0.1) {
-            velocity.setX(kx);
-        } else if (dx < -0.1) {
-            velocity.setX(-kx);
+    private Vector knockback(Player player, Location blast, double radius) {
+        Location at = player.getLocation();
+        double dx = at.getX() - blast.getX();
+        double dy = at.getY() - blast.getY();
+        double dz = at.getZ() - blast.getZ();
+        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        double span = Math.max(0.01, radius);
+        double closeness = Math.max(0.4, Math.min(1.0, 1.0 - (distance / span)));
+        double horizontalLength = Math.sqrt(dx * dx + dz * dz);
+        double hx;
+        double hz;
+        if (horizontalLength < 0.15) {
+            hx = 0;
+            hz = 0;
+        } else {
+            hx = dx / horizontalLength;
+            hz = dz / horizontalLength;
         }
-        if (dz > 0.1) {
-            velocity.setZ(kx);
-        } else if (dz < -0.1) {
-            velocity.setZ(-kx);
+        double horizontal = plugin.settings().fireballKnockX() * closeness;
+        double vertical = plugin.settings().fireballKnockY() * (0.6 + 0.4 * closeness);
+        if (dy < -0.4) {
+            vertical *= 0.35;
         }
-        velocity.setY(ky);
-        player.setVelocity(velocity);
+        return new Vector(hx * horizontal, vertical, hz * horizontal);
     }
 
     private UUID ownerOf(Entity entity) {
@@ -171,5 +210,4 @@ public final class Fireballs {
             return null;
         }
     }
-
 }

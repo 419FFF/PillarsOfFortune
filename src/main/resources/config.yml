@@ -1,27 +1,51 @@
 # Pillars of Fortune
-# Every options: value from the Skript lives here. Edit and /pof reload.
+# Edit this file, then run /pof reload. A restart is only needed when the note in chat says so.
+#
+# config-version tells the plugin which keys this file already has.
+# DO NOT CHANGE config-version. The plugin updates it when a newer jar adds options.
+# Your existing values are kept. New keys are filled in from the defaults.
+config-version: 2
 
+# Chat prefix placed in front of plugin messages. Use & color codes.
 prefix: "&8[&6PoF&8]&r"
+# Text shown on the sidebar and the tab footer. Use your own address.
 server-ip: example.com
 
 worlds:
+  # Existing lobby world. Pillars are never built here, and this world is never recreated.
   lobby-name: world
+  # Void world used for matches. Created on startup if it does not exist.
   game-name: pof_void
+  # When true, the lobby weather is cleared every 10 seconds. The game world is always kept clear.
   clear-lobby-weather: false
 
 arenas:
+  # How many arenas to prepare. Each id gets its own spot on a spiral, using both +X/-X and +Z/-Z.
+  # Spots that would cross the vanilla world border (±30,000,000) are skipped.
   count: 6
-  # region = clear one arena box inside the shared void world
-  # world-per-arena = unload and recreate that arena's void world
+  # Blocks between arena centers. Raised automatically if it is too small for the reset boxes to overlap.
+  # Changing this does not move arenas that already exist until a restart.
+  spacing: 2000
+  # region: clear that arena's box inside the shared void world, then rebuild its pillars.
+  # world-per-arena: unload that arena's own void world, delete it, and create a fresh one.
   reset-mode: region
+  # How many blocks to edit each tick while clearing, so the server does not freeze.
   reset-blocks-per-tick: 8000
+  # Horizontal reach of a reset, measured from the arena center.
+  # The plugin also makes sure this is larger than the build radius, border, and clear radius.
+  # The wipe always runs from the bottom of the world (Y=0) to the top, not only around the pillars.
+  reset-radius: 128
 
 pillars:
+  # How many bedrock pillars to build. Players are capped at this number as well.
   count: 12
+  # Used only when count is higher than the offset list. Extra pillars sit on a circle of this radius.
   radius: 20
+  # Height of each bedrock pillar, ending at y.
   height: 45
+  # Top block of every pillar, and the Y the cages sit on.
   y: 70
-  # Same offsets as the Skript (pof.tmp.ox / pof.tmp.oz)
+  # X,Z offsets from the arena center. The first 12 match the original layout.
   offsets:
     - "20,0"
     - "17,10"
@@ -36,57 +60,100 @@ pillars:
     - "10,-17"
     - "17,-10"
 
+# Players below this Y are eliminated, in addition to anyone who leaves the border.
 void-y: 8
+# Kept from the original options list. Spacing between arenas is arenas.spacing, not this value.
 arena-size: 40
+# How far from the center, on X or Z, a living player may place blocks.
 build-radius: 48
+# Older clear distance. Reset uses arenas.reset-radius and is forced to stay larger than this.
 clear-radius: 72
+# No longer the height of a reset. Resets always clear from the bottom of the world to the top.
 clear-height: 120
+# Players above this Y cannot place blocks.
 max-build-y: 120
+# Distance from the arena center at which a living player is eliminated.
 border-kill: 70
 
+# Queue will not start a match until at least this many people are waiting.
 min-players: 2
+# Most players taken from the queue into one match. Also limited by pillars.count.
 max-players: 12
+# Seconds the cages stay closed after the match is assigned.
 countdown: 15
+# Seconds to wait in queue once enough players are ready. VIP /pof start can cut this to 5.
 queue-seconds: 30
+# Seconds between item drops. Sudden death shortens this to 2 seconds.
 item-seconds: 5
+# Seconds at the start of a round with no damage.
 grace-seconds: 5
+# Seconds to show the winner before players return to the lobby and the arena is wiped.
 end-seconds: 8
+# After this many seconds the round goes to sudden death: faster items and lightning on pillars.
 max-game-seconds: 600
+# Gamemode used in the lobby and inside closed cages. Use a Bukkit name such as ADVENTURE or SURVIVAL.
 lobby-gamemode: ADVENTURE
 
+# Fire charges thrown by living players during a round.
+# Right-click launches a fireball along the crosshair. On impact, players are pushed away from the
+# blast (not just north/south/east/west) and take the damage below once. Vanilla explosion damage is cancelled.
 fireball:
-  speed: 10.0
-  accel: 0.1
-  knockback-x: 1.15
-  knockback-y: 0.75
-  radius: 3.0
+  # Blocks per tick along the look direction. 1.6 is a BedWars-style throw. Higher is faster.
+  speed: 1.6
+  # Horizontal launch strength away from the explosion. Closer players are pushed harder.
+  knockback-horizontal: 2.6
+  # Upward pop added on top of the horizontal push.
+  knockback-vertical: 1.1
+  # Players inside this many blocks of the blast are affected.
+  radius: 3.5
+  # Seconds before the same player can throw another charge.
   cooldown: 0.5
-  damage-self: 0.5
+  # Hearts are half this number. 2.0 is one heart.
+  damage-self: 2.0
   damage-enemy: 2.0
+  # When false, the blast does not set blocks on fire.
+  fire: false
+  # How strongly the blast breaks blocks. 0 breaks nothing.
+  yield: 2.0
 
+# Default stack size for a block-pool item that has no items.amounts entry.
+# The roll is weighted toward the low end, same shape as the original script, scaled to this range.
 block-min: 4
 block-max: 12
+# Chance, out of 100, to actually give an ender pearl when one is rolled.
+# Overridden by items.chances.ENDER_PEARL when that key is set.
 pearl-chance: 15
-# Chance to keep an enchanted pool entry (Skript "stick of knockback" 12%)
+# Chance, out of 100, to keep an enchantment that was rolled. Otherwise the fallback item is given.
+# items.enchant-keep-chance and items.enchant-keep override this.
 enchant-keep-chance: 12
 
+# Relative weight of each item category. They do not have to add up to 100.
+# A category with a higher number is rolled more often.
 rates:
   weapons: 8
   armor: 7
   blocks: 72
   chaos: 13
 
+# Items given in the lobby. Materials are Bukkit 1.8 names. Names support & colors.
 lobby-items:
+  # Slot 0. Right-click or /pof join.
   join-material: NETHER_STAR
   join-name: "&6&lJoin Queue"
+  # Slot 8 while queued.
   leave-material: BARRIER
   leave-name: "&c&lLeave Queue"
+  # Slot 4 for players with slop.pof.vip. Right-click skips the queue timer to 5 seconds.
   vip-material: DIAMOND
   vip-name: "&6&lStart Match"
 
+# Wins, kills, and the other stats. h2 needs no extra setup. mysql uses the host below.
+# Changing these and running /pof reload reconnects. Tables are not deleted.
 storage:
+  # h2 or mysql
   type: h2
   h2:
+    # File name inside the plugin folder. The .mv.db suffix is added by H2.
     file: data
   mysql:
     host: 127.0.0.1
@@ -96,12 +163,16 @@ storage:
     password: ""
 
 leaderboards:
+  # How many names /pof top and %pof_top_<n>_name% return.
   size: 10
+  # How often the cached top list is re-read from SQL. 20 ticks is one second. A win refreshes it immediately.
   refresh-ticks: 200
 
 stats:
+  # true: +1 playtime minute per minute online. false: only while the player is in a match.
   playtime-online-only: true
 
+# 1.8 sound names, played with the pitches from the original mode.
 sounds:
   queue-join: random.orb
   countdown: note.pling
@@ -114,6 +185,8 @@ sounds:
   kill: random.orb
   fireball: mob.ghast.fireball
 
+# Every player-facing string. {placeholders} are filled in by the plugin. & codes are colors.
+# {prefix} is only used by the join and quit lines, which already include the prefix.
 messages:
   reloaded: "&aConfig reloaded."
   no-permission: "&cNo permission."
@@ -215,7 +288,47 @@ messages:
   board-pad: "&8"
   board-ip: "&e{ip}"
 
+# Item pools. A line is a Bukkit 1.8 material. Repeating a line makes that item more common.
+# Extra options go after | and can be combined:
+#   STICK|KNOCKBACK:1                 enchantment and level
+#   DIAMOND_SWORD|DAMAGE_ALL:1,DURABILITY:1
+#   ARROW|amount:1-2                  fixed number or min-max (also written 1..2)
+#   ENDER_PEARL|chance:15             percent chance to actually give it
+#   STICK|KNOCKBACK:2|keep:40|amount:1
+#   chance and keep are out of 100.
+# Items without their own amount use items.default-amount, except the blocks pool,
+# which uses block-min and block-max unless items.amounts (or amount:) sets one.
 items:
+  # Stack size for weapons, armor, and chaos items that do not set an amount.
+  default-amount: 1
+  # Per-material amounts. These override block-min/block-max and default-amount.
+  # A line's amount: still wins over this map.
+  amounts:
+    OBSIDIAN: "1-2"
+    ARROW: "1-2"
+    SNOW_BALL: "1-2"
+    TNT: "1"
+    ENDER_PEARL: "1"
+  # Per-material chance to give the item at all. Missing entries are 100, except ender pearls, which use pearl-chance.
+  chances:
+    ENDER_PEARL: 15
+  # Default chance to keep a rolled enchantment instead of the fallback item.
+  enchant-keep-chance: 12
+  # Per-material override of that chance.
+  enchant-keep:
+    STICK: 12
+  # Enchants applied when the pool line itself does not list any.
+  # Use Bukkit 1.8 enchantment names.
+  enchants:
+    STICK:
+      - KNOCKBACK:1
+  # Item given when an enchantment roll fails.
+  enchant-fallback:
+    weapons: WOOD_SWORD
+    armor: LEATHER_HELMET
+    blocks: COBBLESTONE
+    chaos: COBBLESTONE
+  # Weapon pool. Duplicate lines are extra copies in the random draw.
   weapons:
     - WOOD_SWORD
     - WOOD_SWORD
@@ -298,6 +411,8 @@ items:
     - DIAMOND_BOOTS
     - OBSIDIAN
     - COBBLESTONE
+  # Deleted from inventories, and blocked from pickup, drop, craft, and place.
+  # Named lobby items are kept even when their material is listed here.
   illegal:
     - BEDROCK
     - BARRIER

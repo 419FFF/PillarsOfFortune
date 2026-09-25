@@ -15,6 +15,8 @@ public final class Arena {
     }
 
     public final int id;
+    public final int centerX;
+    public final int centerZ;
     public State state = State.WAITING;
     public final Set<UUID> players = new LinkedHashSet<>();
     public final Set<UUID> alive = new LinkedHashSet<>();
@@ -27,19 +29,20 @@ public final class Arena {
     public int end;
     public UUID winner;
 
-    public Arena(int id) {
+    public Arena(int id, int centerX, int centerZ) {
         this.id = id;
+        this.centerX = centerX;
+        this.centerZ = centerZ;
     }
 
     public int aliveCount() {
         return alive.size();
     }
 
-    public Location center() {
+    public Location centerAt(double y) {
         if (world == null) {
             return null;
         }
-        double y = pillars.isEmpty() ? 70 : pillars.get(0).getY();
-        return new Location(world, id * 2000.0, y, 0);
+        return new Location(world, centerX, y, centerZ);
     }
 }

@@ -9,6 +9,7 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import com.slop.pof.PoFPlugin;
 import com.slop.pof.config.Settings;
+import com.slop.pof.util.Amounts;
 import com.slop.pof.util.Rolls;
 import com.slop.pof.util.Text;
 
@@ -226,40 +227,27 @@ public final class Items {
         if (isIllegal(new ItemStack(spec.material))) {
             return;
         }
-        int amount = 1;
-        if (pool == 2) {
-            amount = Rolls.blockAmount(1 + random.nextInt(100), settings.blockMin(), settings.blockMax());
+        String materialKey = spec.material.name();
+        List<EnchantPair> enchants = spec.enchants.isEmpty()
+                ? parseEnchants(settings.enchantsFor(materialKey))
+                : spec.enchants;
+        int chance = spec.chance >= 0
+                ? spec.chance
+                : settings.chanceFor(materialKey, spec.material == Material.ENDER_PEARL ? settings.pearlChance() : 100);
+        if (random.nextInt(100) >= chance) {
+            return;
         }
-        if (spec.material == Material.OBSIDIAN) {
-            amount = 1 + random.nextInt(2);
+        int amount = amountFor(spec, pool, settings, random);
+        int keep = spec.keep >= 0 ? spec.keep : settings.enchantKeepFor(materialKey);
+        if (!enchants.isEmpty() && random.nextInt(100) >= keep) {
+            Material replacement = fallback(pool, settings);
+            spec = new Spec(replacement, List.of(), null, -1, -1);
+            enchants = List.of();
+            amount = amountFor(spec, pool, settings, random);
         }
-        if (spec.material == Material.ARROW || spec.material == Material.SNOW_BALL) {
-            amount = 1 + random.nextInt(2);
-        }
-        if (spec.material == Material.TNT) {
-            amount = 1;
-        }
-        if (spec.material == Material.ENDER_PEARL) {
-            if (random.nextInt(100) >= settings.pearlChance()) {
-                return;
-            }
-            amount = 1;
-        }
-        if (spec.enchant != null && random.nextInt(100) >= settings.enchantKeepChance()) {
-            if (pool == 3) {
-                spec = new Spec(Material.COBBLESTONE, null, 0);
-                amount = Rolls.blockAmount(1 + random.nextInt(100), settings.blockMin(), settings.blockMax());
-            } else if (pool == 0) {
-                spec = new Spec(Material.WOOD_SWORD, null, 0);
-                amount = 1;
-            } else {
-                spec = new Spec(Material.LEATHER_HELMET, null, 0);
-                amount = 1;
-            }
-        }
-        ItemStack stack = new ItemStack(spec.material, Math.max(1, amount));
-        if (spec.enchant != null) {
-            stack.addUnsafeEnchantment(spec.enchant, Math.max(1, spec.level));
+        ItemStack stack = new ItemStack(spec.material, Math.max(1, Math.min(2304, amount)));
+        for (EnchantPair enchant : enchants) {
+            stack.addUnsafeEnchantment(enchant.enchant, Math.max(1, enchant.level));
         }
         player.getInventory().addItem(stack);
         if (spec.material == Material.FISHING_ROD) {
@@ -325,38 +313,99 @@ public final class Items {
         return specs;
     }
 
+    private int amountFor(Spec spec, int pool, Settings settings, ThreadLocalRandom random) {
+        if (spec.amountSpec != null && !spec.amountSpec.isBlank()) {
+            return Amounts.roll(spec.amountSpec, random);
+        }
+        String mapped = settings.amountSpec(spec.material.name());
+        if (mapped != null && !mapped.isBlank()) {
+            return Amounts.roll(mapped, random);
+        }
+        if (pool == 2) {
+            return Rolls.blockAmount(1 + random.nextInt(100), settings.blockMin(), settings.blockMax());
+        }
+        return settings.defaultAmount();
+    }
+
+    private Material fallback(int pool, Settings settings) {
+        String raw = switch (pool) {
+            case 0 -> settings.fallbackWeapons();
+            case 1 -> settings.fallbackArmor();
+            case 2 -> settings.fallbackBlocks();
+            default -> settings.fallbackChaos();
+        };
+        Material material = material(raw, null);
+        if (material == null) {
+            return pool == 0 ? Material.WOOD_SWORD : pool == 1 ? Material.LEATHER_HELMET : Material.COBBLESTONE;
+        }
+        return material;
+    }
+
     private Spec parseOne(String raw) {
         if (raw == null || raw.isBlank()) {
             return null;
         }
-        String body = raw.trim();
-        Enchantment enchant = null;
-        int level = 0;
-        int bar = body.indexOf('|');
-        if (bar >= 0) {
-            String extra = body.substring(bar + 1).trim();
-            body = body.substring(0, bar).trim();
-            String[] parts = extra.split(":");
-            enchant = Enchantment.getByName(parts[0].trim().toUpperCase(Locale.ROOT));
-            if (parts.length > 1) {
-                try {
-                    level = Integer.parseInt(parts[1].trim());
-                } catch (NumberFormatException ignored) {
-                    level = 1;
-                }
-            } else {
-                level = 1;
-            }
-        }
-        Material material = material(body, null);
-        if (material == null || material == Material.AIR) {
+        String[] tokens = raw.trim().split("\\|");
+        Material type = material(tokens[0], null);
+        if (type == null || type == Material.AIR) {
             plugin.getLogger().warning("Unknown item in pool: " + raw);
             return null;
         }
-        return new Spec(material, enchant, level);
+        List<EnchantPair> enchants = new ArrayList<>();
+        String amount = null;
+        int chance = -1;
+        int keep = -1;
+        for (int i = 1; i < tokens.length; i++) {
+            String token = tokens[i].trim();
+            if (token.isEmpty()) {
+                continue;
+            }
+            String lower = token.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("amount:") || lower.startsWith("amt:")) {
+                amount = token.substring(token.indexOf(':') + 1).trim();
+            } else if (lower.startsWith("chance:")) {
+                chance = parseInt(token.substring(token.indexOf(':') + 1), 100);
+            } else if (lower.startsWith("keep:")) {
+                keep = parseInt(token.substring(token.indexOf(':') + 1), 100);
+            } else {
+                enchants.addAll(parseEnchants(List.of(token)));
+            }
+        }
+        return new Spec(type, enchants, amount, chance, keep);
     }
 
-    static Material material(String raw, Material fallback) {
+    private List<EnchantPair> parseEnchants(List<String> raw) {
+        List<EnchantPair> enchants = new ArrayList<>();
+        for (String entry : raw) {
+            if (entry == null || entry.isBlank()) {
+                continue;
+            }
+            for (String piece : entry.split(",")) {
+                String[] parts = piece.trim().split(":");
+                if (parts.length == 0 || parts[0].isBlank()) {
+                    continue;
+                }
+                Enchantment enchant = Enchantment.getByName(parts[0].trim().toUpperCase(Locale.ROOT));
+                if (enchant == null) {
+                    plugin.getLogger().warning("Unknown enchantment: " + piece);
+                    continue;
+                }
+                int level = parts.length > 1 ? parseInt(parts[1], 1) : 1;
+                enchants.add(new EnchantPair(enchant, level));
+            }
+        }
+        return enchants;
+    }
+
+    private static int parseInt(String raw, int fallback) {
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException ex) {
+            return fallback;
+        }
+    }
+
+    public static Material material(String raw, Material fallback) {
         if (raw == null) {
             return fallback;
         }
@@ -376,6 +425,9 @@ public final class Items {
         }
     }
 
-    private record Spec(Material material, Enchantment enchant, int level) {
+    private record Spec(Material material, List<EnchantPair> enchants, String amountSpec, int chance, int keep) {
+    }
+
+    private record EnchantPair(Enchantment enchant, int level) {
     }
 }

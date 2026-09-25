@@ -24,12 +24,11 @@ public final class Pillars {
         if (bot < 1) {
             bot = 1;
         }
-        int cx = arena.id * 2000;
         List<int[]> offsets = plugin.settings().pillarOffsets();
         arena.pillars.clear();
         for (int[] offset : offsets) {
-            int x = cx + offset[0];
-            int z = offset[1];
+            int x = arena.centerX + offset[0];
+            int z = arena.centerZ + offset[1];
             for (int y = bot; y <= top; y++) {
                 world.getBlockAt(x, y, z).setType(Material.BEDROCK, false);
             }

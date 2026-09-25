@@ -9,7 +9,9 @@ import com.slop.pof.arena.Arenas;
 import com.slop.pof.arena.Pillars;
 import com.slop.pof.arena.ResetQueue;
 import com.slop.pof.command.PofCommand;
+import com.slop.pof.config.ConfigUpdater;
 import com.slop.pof.config.Settings;
+import com.slop.pof.papi.PofPlaceholders;
 import com.slop.pof.game.Fireballs;
 import com.slop.pof.game.Game;
 import com.slop.pof.game.Items;
@@ -39,6 +41,7 @@ public final class PoFPlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         reloadConfig();
+        ConfigUpdater.update(this);
         settings = Settings.from(getConfig());
         if (settings.lobbyWorld().equalsIgnoreCase(settings.gameWorld())) {
             getLogger().severe("worlds.game-name must be different from worlds.lobby-name.");
@@ -78,6 +81,11 @@ public final class PoFPlugin extends JavaPlugin {
         boards = new Boards(this);
         game = new Game(this);
         game.refreshTop();
+        if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            if (new PofPlaceholders(this).register()) {
+                getLogger().info("PlaceholderAPI hooked. Stats are available as %pof_<stat>%.");
+            }
+        }
         PofCommand commands = new PofCommand(this);
         PluginCommand command = getCommand("pof");
         if (command != null) {
@@ -117,6 +125,7 @@ public final class PoFPlugin extends JavaPlugin {
      */
     public boolean reloadPlugin() {
         reloadConfig();
+        ConfigUpdater.update(this);
         Settings next = Settings.from(getConfig());
         if (!next.storageFingerprint().equals(settings.storageFingerprint())) {
             Database fresh = openDatabase(next);

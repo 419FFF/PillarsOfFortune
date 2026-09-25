@@ -1,25 +1,34 @@
+# Pillars of Fortune plugin description. Bukkit reads this file. Do not rename the keys.
 name: PillarsOfFortune
 version: 1.0.0
+# Java entry point. Must match the class in the jar.
 main: com.slop.pof.PoFPlugin
 author: example.com
 website: example.com
 description: Pillars of Fortune
-softdepend: [ProtocolLib]
+# The plugin starts without these. It uses them only when they are installed.
+softdepend: [ProtocolLib, PlaceholderAPI]
 commands:
   pof:
     description: Pillars of Fortune
     usage: /pof [join|leave|stats|top|start|stop|setlobby|regen|arenas|debug|reload]
+    # Extra names for the same command.
     aliases: [pillars, fortune]
 permissions:
+  # Join, leave, your own stats, the leaderboard, and the lobby queue item.
   slop.pof.play:
     description: Join, leave, own stats, top, and lobby queue items
     default: true
+  # Shorten the queue countdown to 5 seconds, and receive the start item.
   slop.pof.vip:
     description: Skip the queue timer to 5 seconds
     default: op
+  # /pof stats <name>, including players who are offline.
   slop.pof.stats.others:
     description: View another player's stats
     default: true
+  # Stop, lobby, regen, reload, build in the lobby, and use blocked commands in a match.
+  # Also grants play, vip, and stats.others.
   slop.pof.admin:
     description: Stop matches, set the lobby, regen, reload, and bypass arena limits
     default: op
