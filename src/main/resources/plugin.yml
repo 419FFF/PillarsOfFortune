@@ -1,0 +1,29 @@
+name: PillarsOfFortune
+version: 1.0.0
+main: com.slop.pof.PoFPlugin
+author: example.com
+website: example.com
+description: Pillars of Fortune
+softdepend: [ProtocolLib]
+commands:
+  pof:
+    description: Pillars of Fortune
+    usage: /pof [join|leave|stats|top|start|stop|setlobby|regen|arenas|debug|reload]
+    aliases: [pillars, fortune]
+permissions:
+  slop.pof.play:
+    description: Join, leave, own stats, top, and lobby queue items
+    default: true
+  slop.pof.vip:
+    description: Skip the queue timer to 5 seconds
+    default: op
+  slop.pof.stats.others:
+    description: View another player's stats
+    default: true
+  slop.pof.admin:
+    description: Stop matches, set the lobby, regen, reload, and bypass arena limits
+    default: op
+    children:
+      slop.pof.play: true
+      slop.pof.vip: true
+      slop.pof.stats.others: true

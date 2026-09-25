@@ -1,0 +1,309 @@
+# Pillars of Fortune
+# Every options: value from the Skript lives here. Edit and /pof reload.
+
+prefix: "&8[&6PoF&8]&r"
+server-ip: example.com
+
+worlds:
+  lobby-name: world
+  game-name: pof_void
+  clear-lobby-weather: false
+
+arenas:
+  count: 6
+  # region = clear one arena box inside the shared void world
+  # world-per-arena = unload and recreate that arena's void world
+  reset-mode: region
+  reset-blocks-per-tick: 8000
+
+pillars:
+  count: 12
+  radius: 20
+  height: 45
+  y: 70
+  # Same offsets as the Skript (pof.tmp.ox / pof.tmp.oz)
+  offsets:
+    - "20,0"
+    - "17,10"
+    - "10,17"
+    - "0,20"
+    - "-10,17"
+    - "-17,10"
+    - "-20,0"
+    - "-17,-10"
+    - "-10,-17"
+    - "0,-20"
+    - "10,-17"
+    - "17,-10"
+
+void-y: 8
+arena-size: 40
+build-radius: 48
+clear-radius: 72
+clear-height: 120
+max-build-y: 120
+border-kill: 70
+
+min-players: 2
+max-players: 12
+countdown: 15
+queue-seconds: 30
+item-seconds: 5
+grace-seconds: 5
+end-seconds: 8
+max-game-seconds: 600
+lobby-gamemode: ADVENTURE
+
+fireball:
+  speed: 10.0
+  accel: 0.1
+  knockback-x: 1.15
+  knockback-y: 0.75
+  radius: 3.0
+  cooldown: 0.5
+  damage-self: 0.5
+  damage-enemy: 2.0
+
+block-min: 4
+block-max: 12
+pearl-chance: 15
+# Chance to keep an enchanted pool entry (Skript "stick of knockback" 12%)
+enchant-keep-chance: 12
+
+rates:
+  weapons: 8
+  armor: 7
+  blocks: 72
+  chaos: 13
+
+lobby-items:
+  join-material: NETHER_STAR
+  join-name: "&6&lJoin Queue"
+  leave-material: BARRIER
+  leave-name: "&c&lLeave Queue"
+  vip-material: DIAMOND
+  vip-name: "&6&lStart Match"
+
+storage:
+  type: h2
+  h2:
+    file: data
+  mysql:
+    host: 127.0.0.1
+    port: 3306
+    database: minecraft
+    user: root
+    password: ""
+
+leaderboards:
+  size: 10
+  refresh-ticks: 200
+
+stats:
+  playtime-online-only: true
+
+sounds:
+  queue-join: random.orb
+  countdown: note.pling
+  eliminated: mob.wither.hurt
+  victory: random.levelup
+  defeat: random.explode
+  cages: mob.wither.spawn
+  fight: random.levelup
+  item: random.pop
+  kill: random.orb
+  fireball: mob.ghast.fireball
+
+messages:
+  reloaded: "&aConfig reloaded."
+  no-permission: "&cNo permission."
+  players-only: "&cOnly players can do that."
+  already-in-match: "&cYou are already in a match."
+  already-queued: "&7Already in the queue."
+  queued: "&eQueued. &7Players waiting: &f{count}&7/&f{max}"
+  queue-join-broadcast: "&e{player} &7joined the queue &8(&f{count}&7/&f{max}&8)"
+  queue-leave: "&7Left the queue."
+  queue-leave-broadcast: "&e{player} &7left the queue &8(&f{count}&7/&f{max}&8)"
+  nothing-to-leave: "&7Nothing to leave."
+  forfeited: "&7You forfeited."
+  cannot-during-match: "&cYou cannot use that during a match."
+  join-queue-first: "&cJoin the queue first."
+  need-players: "&cNeed at least {min} players in queue."
+  countdown-skipped: "&eCountdown skipped to &f5&e seconds!"
+  timer-set: "&aQueue timer set to 5 seconds."
+  timer-already: "&7Timer already at &f{time}&7s."
+  help: "&6/pof join&7, &6leave&7, &6stats&7, &6top"
+  help-admin: "&cAdmin: &6start stop setlobby regen arenas debug reload"
+  help-console: "[PoF] /pof stop | regen | arenas | reload"
+  debug-on: "&7Debug &aON"
+  debug-off: "&7Debug &cOFF"
+  debug-line: "&8debug {message}"
+  player-not-found: "&cPlayer not found."
+  stats-header: "&6{player} &7career stats"
+  stats-line1: "&e{wins} &7wins  &e{kills} &7kills  &e{deaths} &7deaths"
+  stats-line2: "&e{games} &7games  &e{streak} &7streak  &e{best} &7best"
+  stats-line3: "&e{items} &7items rolled  &e{mins} &7min played"
+  top-header: "&6Top wins"
+  top-line: "&e{rank}. &f{player} &7- &6{wins} &7wins"
+  top-empty: "&7No games recorded yet."
+  top-error: "&cLeaderboard is unavailable."
+  lobby-set: "&aLobby set."
+  stopped-arena: "&cStopped arena {id}."
+  stopped-all: "&cAll arenas stopped."
+  stopped-all-console: "[PoF] All arenas stopped."
+  regen-done: "&aIdle arenas rebuilt."
+  regen-done-console: "[PoF] Idle arenas rebuilt."
+  arena-line: "&e#{id} &7{state} &8- &f{alive} alive"
+  arena-line-console: "[PoF] Arena {id} {state} ({alive} alive)"
+  arena-missing: "&cNo arena with id {id}."
+  unknown: "&cUnknown subcommand. &7/pof"
+  elim-void: "&e{player} &7fell into the void."
+  elim-leave: "&e{player} &7forfeited."
+  elim-death: "&e{player} &7was eliminated."
+  slain: "&e{victim} &7was slain by &c{killer}"
+  title-eliminated: "&cELIMINATED"
+  subtitle-eliminated: "&7You are spectating"
+  no-winner: "&cNo winner. The pillars are empty."
+  title-draw: "&7DRAW"
+  subtitle-draw: "&8No one remained"
+  title-victory: "&6&lVICTORY"
+  subtitle-victory: "&eYou own the pillars"
+  won: "&6{player} &ewon Pillars of Fortune!"
+  title-defeat: "&cDEFEAT"
+  subtitle-defeat: "&7Winner: &e{player}"
+  title-cages: "&6&lPILLARS OF FORTUNE"
+  subtitle-cages: "&eCages open in {seconds}s"
+  title-fight: "&6FIGHT"
+  subtitle-fight: "&7Items incoming"
+  grace-over: "&cGrace period over. PvP is live."
+  sudden-death: "&cSudden death! Lightning on the pillars."
+  action-item: "&6+ item"
+  match-starting: "&eMatch starting in &f{seconds}&e seconds."
+  match-starting-soon: "&eMatch starting in &f{seconds}&e seconds..."
+  title-count: "&e{time}"
+  subtitle-count: "&7Match starting"
+  title-start-count: "&6{time}"
+  subtitle-start-count: "&7Get ready"
+  join-hint: "&7Right-click the &equeue item &7or type &e/pof join&7."
+  join-message: "{prefix} &e{player} &7joined."
+  quit-message: "{prefix} &e{player} &7left."
+  restart-required: "&cA full restart is required before every arena uses the new arena or pillar settings."
+  reload-waiting-only: "&eActive matches were left running. New settings apply to waiting arenas."
+  storage-failed: "&cStorage reconnect failed. The previous database is still in use."
+  chat-alive: "&8[&6PoF&8] &f{player}&8: &7{message}"
+  chat-spec: "&8[&7SPEC&8] &8{player}&8: &7{message}"
+  tab-header-lobby: "&6&lPILLARS OF FORTUNE"
+  tab-footer-lobby: "&7Queue &f{queue} &8| &7Online &f{online} &8| &e{ip}"
+  tab-header-arena: "&6&lPILLARS OF FORTUNE &8- &7Arena {id}"
+  tab-footer-arena: "&f{state} &8| &e{alive} alive &8| &e{ip}"
+  board-title-lobby: "&6&lPILLARS"
+  board-title-starting: "&6&lSTARTING"
+  board-title-finished: "&6&lFINISHED"
+  board-title-fortune: "&6&lFORTUNE"
+  board-join: "&6/pof join"
+  board-wins: "&fWins: &e{value}"
+  board-kills: "&fKills: &e{value}"
+  board-streak: "&fStreak: &e{value}"
+  board-start: "&fStart: &e{value}s"
+  board-queue: "&fQueue: &e{count}&7/&f{max}"
+  board-arena: "&fArena: &e{value}"
+  board-starts: "&fStarts: &e{value}s"
+  board-alive: "&fAlive: &e{value}"
+  board-item: "&fItem: &e{value}s"
+  board-time: "&fTime: &e{value}s"
+  board-grace: "&aGrace: &f{value}s"
+  board-pad: "&8"
+  board-ip: "&e{ip}"
+
+items:
+  weapons:
+    - WOOD_SWORD
+    - WOOD_SWORD
+    - STONE_SWORD
+    - STONE_SWORD
+    - GOLD_SWORD
+    - IRON_SWORD
+    - WOOD_AXE
+    - STONE_AXE
+    - IRON_AXE
+    - BOW
+    - BOW
+    - ARROW
+    - FISHING_ROD
+    - SNOW_BALL
+    - STICK
+  armor:
+    - LEATHER_HELMET
+    - LEATHER_HELMET
+    - LEATHER_CHESTPLATE
+    - LEATHER_CHESTPLATE
+    - LEATHER_LEGGINGS
+    - LEATHER_BOOTS
+    - LEATHER_BOOTS
+    - GOLD_HELMET
+    - GOLD_CHESTPLATE
+    - GOLD_LEGGINGS
+    - GOLD_BOOTS
+    - CHAINMAIL_HELMET
+    - CHAINMAIL_CHESTPLATE
+    - CHAINMAIL_LEGGINGS
+    - CHAINMAIL_BOOTS
+    - IRON_HELMET
+    - IRON_CHESTPLATE
+    - IRON_LEGGINGS
+    - IRON_BOOTS
+  blocks:
+    - COBBLESTONE
+    - COBBLESTONE
+    - COBBLESTONE
+    - STONE
+    - STONE
+    - DIRT
+    - DIRT
+    - LOG
+    - WOOD
+    - WOOD
+    - GLASS
+    - WOOL
+    - SAND
+    - GRAVEL
+    - WEB
+    - SOUL_SAND
+    - ICE
+    - PACKED_ICE
+    - SLIME_BLOCK
+    - LADDER
+    - FENCE
+    - GLOWSTONE
+    - NETHERRACK
+    - BRICK
+    - SANDSTONE
+    - CLAY
+    - SNOW_BLOCK
+    - SMOOTH_BRICK
+    - ENDER_STONE
+  chaos:
+    - TNT
+    - FLINT_AND_STEEL
+    - FIREBALL
+    - FIREBALL
+    - LAVA_BUCKET
+    - WATER_BUCKET
+    - ANVIL
+    - ENDER_PEARL
+    - SHEARS
+    - DIAMOND_SWORD
+    - "STICK|KNOCKBACK:1"
+    - DIAMOND_HELMET
+    - DIAMOND_BOOTS
+    - OBSIDIAN
+    - COBBLESTONE
+  illegal:
+    - BEDROCK
+    - BARRIER
+    - COMMAND
+    - COMMAND_MINECART
+    - MOB_SPAWNER
+    - ENDER_PORTAL_FRAME
+    - ENDER_PORTAL
+    - PORTAL
