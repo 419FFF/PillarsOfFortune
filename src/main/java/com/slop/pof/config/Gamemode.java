@@ -33,7 +33,7 @@ public final class Gamemode {
     public static Gamemode read(String id, ConfigurationSection section) {
         return new Gamemode(
                 id,
-                section.getBoolean("enabled", false),
+                section.getBoolean("enabled", true),
                 section.getString("name", id),
                 section.getString("icon", "NETHER_STAR"),
                 optionalInt(section, "min-players"),

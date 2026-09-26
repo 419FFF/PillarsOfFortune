@@ -4,7 +4,7 @@
 # config-version is how far this file has been upgraded.
 # DO NOT CHANGE config-version. On startup and /pof reload the plugin walks an older
 # number forward to this jar's version, keeps your values, and writes config.yml.vN.bak first.
-config-version: 8
+config-version: 9
 
 # Chat prefix placed in front of plugin messages. Use & color codes.
 prefix: "&8[&6PoF&8]&r"
@@ -99,14 +99,16 @@ max-game-seconds: 600
 # Gamemode used in the lobby and inside closed cages. Use a Bukkit name such as ADVENTURE or SURVIVAL.
 lobby-gamemode: ADVENTURE
 
-# Queues players can join. enabled: true means it can be selected.
-# One enabled gamemode joins immediately. Two or more open a chest menu.
+# Queues players can join. A mode listed here is on unless enabled is set to false.
+# One enabled mode is what /pof join and the queue item use. Two or more open a chest menu.
 # Leave min-players, max-players, countdown, queue-seconds, or item-delay-seconds out to use the global values.
 gamemodes:
+  # Default mode. Join uses this while it is the only one turned on.
   classic:
     enabled: true
     name: "&6Classic"
     icon: NETHER_STAR
+  # Example of a second mode. Set enabled to true to show the mode menu.
   custom:
     enabled: false
     name: "&bCustom"

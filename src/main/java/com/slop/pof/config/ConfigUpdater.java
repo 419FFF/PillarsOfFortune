@@ -19,7 +19,7 @@ import java.util.logging.Level;
  * The previous file is saved as {@code config.yml.vN.bak} before the converted file is written.
  */
 public final class ConfigUpdater {
-    public static final int CURRENT = 8;
+    public static final int CURRENT = 9;
 
     private ConfigUpdater() {
     }
@@ -81,6 +81,9 @@ public final class ConfigUpdater {
             case 5 -> to6(config, defaults);
             case 6 -> to7(config);
             case 7 -> to8(config);
+            case 8 -> {
+                // Gamemode blocks saved as "classic: {}" are filled from the jar after this step.
+            }
             default -> {
                 // A gap still moves forward. Missing keys are filled after the last step.
             }
@@ -264,14 +267,28 @@ public final class ConfigUpdater {
 
     private static void ensure(FileConfiguration config, YamlConfiguration defaults, String path) {
         if (!config.contains(path) && defaults.contains(path)) {
-            config.set(path, defaults.get(path));
+            copy(config, path, defaults.get(path));
         }
     }
 
     private static void force(FileConfiguration config, YamlConfiguration defaults, String path) {
         if (defaults.contains(path)) {
-            config.set(path, defaults.get(path));
+            copy(config, path, defaults.get(path));
         }
+    }
+
+    /**
+     * Copies a value, including every nested key. Setting a configuration section directly
+     * saves as {@code classic: {}} and drops enabled, name, and icon.
+     */
+    static void copy(FileConfiguration config, String path, Object value) {
+        if (value instanceof ConfigurationSection section) {
+            for (String key : section.getKeys(false)) {
+                copy(config, path + "." + key, section.get(key));
+            }
+            return;
+        }
+        config.set(path, value);
     }
 
     private static int fillMissing(ConfigurationSection defaults, FileConfiguration config, String prefix) {
@@ -284,13 +301,13 @@ public final class ConfigUpdater {
             ConfigurationSection child = defaults.getConfigurationSection(key);
             if (child != null) {
                 if (!config.isConfigurationSection(path)) {
-                    config.set(path, defaults.get(key));
+                    copy(config, path, child);
                     added++;
                 } else {
                     added += fillMissing(child, config, path);
                 }
             } else if (!config.contains(path)) {
-                config.set(path, defaults.get(key));
+                copy(config, path, defaults.get(key));
                 added++;
             }
         }
