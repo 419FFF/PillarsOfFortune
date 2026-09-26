@@ -9,12 +9,16 @@ import org.bukkit.potion.PotionEffect;
 import com.slop.pof.Perms;
 import com.slop.pof.PoFPlugin;
 import com.slop.pof.arena.Arena;
+import com.slop.pof.arena.PillarSlots;
+import com.slop.pof.config.Gamemode;
 import com.slop.pof.config.Settings;
 import com.slop.pof.storage.Stats;
 import com.slop.pof.storage.TopEntry;
 import com.slop.pof.util.Text;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -28,8 +32,9 @@ public final class Game {
 
     private final PoFPlugin plugin;
     private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
-    private final List<UUID> queue = new ArrayList<>();
-    private Integer queueTimer;
+    private final Map<String, List<UUID>> queues = new LinkedHashMap<>();
+    private final Map<String, Integer> timers = new HashMap<>();
+    private final Map<UUID, String> queuedMode = new HashMap<>();
     private List<TopEntry> top = List.of();
     private boolean topReady;
 
@@ -66,15 +71,41 @@ public final class Game {
     }
 
     public boolean queued(UUID uuid) {
-        return queue.contains(uuid);
+        return queuedMode.containsKey(uuid);
+    }
+
+    public String queuedMode(UUID uuid) {
+        return queuedMode.get(uuid);
     }
 
     public int queueSize() {
-        return queue.size();
+        return queuedMode.size();
     }
 
-    public int queueTimer() {
-        return queueTimer == null ? 0 : queueTimer;
+    public int queueSize(String modeId) {
+        if (modeId == null) {
+            return 0;
+        }
+        List<UUID> waiting = queues.get(modeId);
+        return waiting == null ? 0 : waiting.size();
+    }
+
+    public int queueTimer(UUID uuid) {
+        String modeId = queuedMode.get(uuid);
+        if (modeId == null) {
+            return 0;
+        }
+        Integer timer = timers.get(modeId);
+        return timer == null ? 0 : timer;
+    }
+
+    public boolean waitingForPlayers(UUID uuid) {
+        String modeId = queuedMode.get(uuid);
+        Gamemode mode = plugin.settings().gamemode(modeId);
+        if (mode == null) {
+            return false;
+        }
+        return queueSize(modeId) < mode.minPlayers(plugin.settings());
     }
 
     public List<TopEntry> top() {
@@ -102,7 +133,7 @@ public final class Game {
         session(player);
         toLobby(player);
         plugin.boards().refresh(player);
-        player.sendMessage(plugin.settings().chat("join-hint"));
+        say(player, "join-hint");
     }
 
     public void handleQuit(Player player) {
@@ -111,7 +142,7 @@ public final class Game {
         if (session.alive) {
             eliminate(player, "leave");
         }
-        queue.remove(player.getUniqueId());
+        leaveQueue(player.getUniqueId());
         Arena arena = arenaId == 0 ? null : plugin.arenas().get(arenaId);
         if (arena != null) {
             arena.players.remove(player.getUniqueId());
@@ -127,25 +158,56 @@ public final class Game {
     public void join(Player player) {
         Settings settings = plugin.settings();
         if (!player.hasPermission(Perms.PLAY)) {
-            player.sendMessage(settings.chat("no-permission"));
+            say(player, "no-permission");
             return;
         }
         plugin.database().ensure(player.getUniqueId(), player.getName());
         Session session = session(player);
         if (session.arenaId != 0) {
-            player.sendMessage(settings.chat("already-in-match"));
+            say(player, "already-in-match");
             return;
         }
-        if (queue.contains(player.getUniqueId())) {
-            player.sendMessage(settings.chat("already-queued"));
+        List<Gamemode> modes = settings.enabledGamemodes();
+        if (modes.isEmpty()) {
+            say(player, "gamemode-none");
             return;
         }
-        queue.add(player.getUniqueId());
-        int count = queue.size();
-        player.sendMessage(settings.chat("queued", "count", String.valueOf(count), "max", String.valueOf(settings.maxPlayers())));
+        if (modes.size() == 1) {
+            joinMode(player, modes.get(0));
+            return;
+        }
+        if (queued(player.getUniqueId())) {
+            say(player, "already-queued");
+            return;
+        }
+        plugin.menus().open(player);
+    }
+
+    public void joinMode(Player player, Gamemode mode) {
+        Settings settings = plugin.settings();
+        if (mode == null || !mode.enabled) {
+            say(player, "gamemode-none");
+            return;
+        }
+        Session session = session(player);
+        if (session.arenaId != 0) {
+            say(player, "already-in-match");
+            return;
+        }
+        if (mode.id.equals(queuedMode.get(player.getUniqueId()))) {
+            say(player, "already-queued");
+            return;
+        }
+        leaveQueue(player.getUniqueId());
+        queue(mode.id).add(player.getUniqueId());
+        queuedMode.put(player.getUniqueId(), mode.id);
+        int count = queueSize(mode.id);
+        int max = mode.maxPlayers(settings);
+        String label = Text.color(mode.name);
+        say(player, "queued", "mode", label, "count", String.valueOf(count), "max", String.valueOf(max));
         Text.sound(player, settings.sound("queue-join", "random.orb"), 1f, 1.2f);
         plugin.items().giveQueued(player);
-        lobby("queue-join-broadcast", "player", player.getName(), "count", String.valueOf(count), "max", String.valueOf(settings.maxPlayers()));
+        lobby(player, "queue-join-broadcast", "player", player.getName(), "mode", label, "count", String.valueOf(count), "max", String.valueOf(max));
         plugin.boards().refresh(player);
     }
 
@@ -155,19 +217,23 @@ public final class Game {
         if (session.alive) {
             eliminate(player, "leave");
             toLobby(player);
-            player.sendMessage(settings.chat("forfeited"));
+            say(player, "forfeited");
             plugin.boards().refresh(player);
             return;
         }
-        if (queue.remove(player.getUniqueId())) {
+        String modeId = queuedMode.get(player.getUniqueId());
+        if (leaveQueue(player.getUniqueId())) {
             plugin.items().giveLobby(player);
-            player.sendMessage(settings.chat("queue-leave"));
-            int count = queue.size();
-            lobby("queue-leave-broadcast", "player", player.getName(), "count", String.valueOf(count), "max", String.valueOf(settings.maxPlayers()));
+            say(player, "queue-leave");
+            Gamemode mode = settings.gamemode(modeId);
+            int max = mode == null ? settings.maxPlayers() : mode.maxPlayers(settings);
+            String label = mode == null ? "" : Text.color(mode.name);
+            lobby(player, "queue-leave-broadcast", "player", player.getName(), "mode", label,
+                    "count", String.valueOf(queueSize(modeId)), "max", String.valueOf(max));
             plugin.boards().refresh(player);
             return;
         }
-        player.sendMessage(settings.chat("nothing-to-leave"));
+        say(player, "nothing-to-leave");
     }
 
     public void leaveQueueItem(Player player) {
@@ -175,31 +241,35 @@ public final class Game {
         if (session.arenaId != 0) {
             return;
         }
-        if (!queue.remove(player.getUniqueId())) {
+        String modeId = queuedMode.get(player.getUniqueId());
+        if (!leaveQueue(player.getUniqueId())) {
             return;
         }
         Settings settings = plugin.settings();
         plugin.items().giveLobby(player);
-        player.sendMessage(settings.chat("queue-leave"));
-        int count = queue.size();
-        lobby("queue-leave-broadcast", "player", player.getName(), "count", String.valueOf(count), "max", String.valueOf(settings.maxPlayers()));
+        say(player, "queue-leave");
+        Gamemode mode = settings.gamemode(modeId);
+        int max = mode == null ? settings.maxPlayers() : mode.maxPlayers(settings);
+        String label = mode == null ? "" : Text.color(mode.name);
+        lobby(player, "queue-leave-broadcast", "player", player.getName(), "mode", label,
+                "count", String.valueOf(queueSize(modeId)), "max", String.valueOf(max));
         plugin.boards().refresh(player);
     }
 
     public boolean vipStart(Player player, boolean fromItem) {
         Settings settings = plugin.settings();
         if (!player.hasPermission(Perms.VIP)) {
-            player.sendMessage(settings.chat("no-permission"));
+            say(player, "no-permission");
             return false;
         }
         Session session = session(player);
         if (session.arenaId != 0) {
-            player.sendMessage(settings.chat("cannot-during-match"));
+            say(player, "cannot-during-match");
             return false;
         }
         boolean admin = player.hasPermission(Perms.ADMIN);
-        if (!queue.contains(player.getUniqueId()) && (fromItem || !admin)) {
-            player.sendMessage(settings.chat("join-queue-first"));
+        if (!queued(player.getUniqueId()) && (fromItem || !admin)) {
+            say(player, "join-queue-first");
             return false;
         }
         return skipTimer(player);
@@ -207,33 +277,58 @@ public final class Game {
 
     public boolean skipTimer(Player actor) {
         Settings settings = plugin.settings();
-        int count = queue.size();
-        if (count < settings.minPlayers()) {
-            if (actor != null) {
-                actor.sendMessage(settings.chat("need-players", "min", String.valueOf(settings.minPlayers())));
+        List<Gamemode> targets = new ArrayList<>();
+        if (actor != null && queued(actor.getUniqueId())) {
+            Gamemode mode = settings.gamemode(queuedMode.get(actor.getUniqueId()));
+            if (mode != null) {
+                targets.add(mode);
             }
-            return false;
+        } else {
+            targets.addAll(settings.enabledGamemodes());
         }
-        if (queueTimer == null) {
-            queueTimer = settings.queueSeconds();
+        boolean any = false;
+        boolean ready = false;
+        for (Gamemode mode : targets) {
+            int count = queueSize(mode.id);
+            int min = mode.minPlayers(settings);
+            if (count < min) {
+                continue;
+            }
+            ready = true;
+            any = skipTimer(mode, actor) || any;
         }
-        if (queueTimer > VIP_TIMER_SECONDS) {
-            queueTimer = VIP_TIMER_SECONDS;
-            for (UUID uuid : queue) {
+        if (!ready && actor != null) {
+            int min = targets.isEmpty() ? settings.minPlayers() : targets.get(0).minPlayers(settings);
+            say(actor, "need-players", "min", String.valueOf(min));
+        }
+        return any;
+    }
+
+    private boolean skipTimer(Gamemode mode, Player actor) {
+        Settings settings = plugin.settings();
+        Integer timer = timers.get(mode.id);
+        if (timer == null) {
+            timer = mode.queueSeconds(settings);
+        }
+        if (timer > VIP_TIMER_SECONDS) {
+            timers.put(mode.id, VIP_TIMER_SECONDS);
+            for (UUID uuid : queue(mode.id)) {
                 Player queued = Bukkit.getPlayer(uuid);
                 if (queued == null) {
                     continue;
                 }
-                queued.sendMessage(settings.chat("countdown-skipped"));
+                say(queued, "countdown-skipped");
                 Text.title(queued, settings.text("title-count", "time", "5"), settings.text("subtitle-count"), 1);
             }
             if (actor != null) {
-                actor.sendMessage(settings.chat("timer-set"));
+                say(actor, "timer-set");
             }
-        } else if (actor != null) {
-            actor.sendMessage(settings.chat("timer-already", "time", String.valueOf(queueTimer)));
+            return true;
         }
-        return true;
+        if (actor != null) {
+            say(actor, "timer-already", "time", String.valueOf(timer));
+        }
+        return false;
     }
 
     public void toLobby(Player player) {
@@ -262,6 +357,7 @@ public final class Game {
         if (player.hasPermission(Perms.PLAY)) {
             plugin.items().giveLobby(player);
         }
+        plugin.boards().refreshVisibility();
     }
 
     public boolean stopArena(int id) {
@@ -287,8 +383,9 @@ public final class Game {
         for (Arena arena : plugin.arenas().all()) {
             stopArena(arena.id);
         }
-        queue.clear();
-        queueTimer = null;
+        queues.clear();
+        timers.clear();
+        queuedMode.clear();
     }
 
     public void regen() {
@@ -367,12 +464,20 @@ public final class Game {
         if (center != null) {
             player.teleport(center);
         }
-        String key = switch (reason) {
-            case "void" -> "elim-void";
-            case "leave" -> "elim-leave";
-            default -> "elim-death";
-        };
-        arenaMessage(arena, settings.chat(key, "player", player.getName()));
+        Player voidKiller = "void".equals(reason) ? recentAttacker(player) : null;
+        if (voidKiller != null) {
+            grantKill(player, voidKiller);
+            arenaMessage(arena, player, "elim-void-kill", "player", player.getName(), "killer", voidKiller.getName());
+        } else {
+            String key = switch (reason) {
+                case "void" -> "elim-void";
+                case "leave" -> "elim-leave";
+                default -> "elim-death";
+            };
+            arenaMessage(arena, player, key, "player", player.getName());
+        }
+        session.lastHitBy = null;
+        session.lastHitAt = 0L;
         Text.title(player, settings.text("title-eliminated"), settings.text("subtitle-eliminated"), 3);
         Text.sound(player, settings.sound("eliminated", "mob.wither.hurt"), 0.25f, 1.3f);
         if (plugin.isDebug()) {
@@ -381,71 +486,137 @@ public final class Game {
         checkWin(arena);
     }
 
+    public void tagAttacker(Player victim, Player attacker) {
+        if (victim == null || attacker == null || victim.equals(attacker)) {
+            return;
+        }
+        Session session = session(victim);
+        session.lastHitBy = attacker.getUniqueId();
+        session.lastHitAt = System.currentTimeMillis();
+    }
+
     public void creditKill(Player victim, Player attacker) {
-        if (attacker == null || attacker.equals(victim)) {
+        if (!grantKill(victim, attacker)) {
             return;
         }
         Arena arena = arena(victim);
-        if (arena == null) {
-            return;
+        if (arena != null) {
+            arenaMessage(arena, victim, "slain", "victim", victim.getName(), "killer", attacker.getName());
+        }
+    }
+
+    private boolean grantKill(Player victim, Player attacker) {
+        if (attacker == null || victim == null || attacker.equals(victim)) {
+            return false;
+        }
+        if (arena(victim) == null) {
+            return false;
         }
         plugin.database().addKill(attacker.getUniqueId());
         session(attacker).kills++;
-        arenaMessage(arena, plugin.settings().chat("slain", "victim", victim.getName(), "killer", attacker.getName()));
         Text.sound(attacker, plugin.settings().sound("kill", "random.orb"), 1f, 1.4f);
+        return true;
+    }
+
+    private Player recentAttacker(Player victim) {
+        Session session = session(victim);
+        if (session.lastHitBy == null) {
+            return null;
+        }
+        long window = plugin.settings().voidCreditSeconds() * 1000L;
+        if (window <= 0 || System.currentTimeMillis() - session.lastHitAt > window) {
+            return null;
+        }
+        Player attacker = Bukkit.getPlayer(session.lastHitBy);
+        if (attacker == null || attacker.equals(victim)) {
+            return null;
+        }
+        Arena victimArena = arena(victim);
+        Arena attackerArena = arena(attacker);
+        if (victimArena == null || attackerArena == null || victimArena.id != attackerArena.id) {
+            return null;
+        }
+        return attacker;
     }
 
     private void tryStart() {
+        for (Gamemode mode : plugin.settings().enabledGamemodes()) {
+            tryStart(mode);
+        }
+    }
+
+    private void tryStart(Gamemode mode) {
         Settings settings = plugin.settings();
-        if (queue.size() < settings.minPlayers()) {
-            queueTimer = null;
+        List<UUID> waiting = queue(mode.id);
+        int min = mode.minPlayers(settings);
+        if (waiting.size() < min) {
+            timers.remove(mode.id);
             return;
         }
-        if (queueTimer == null) {
-            queueTimer = settings.queueSeconds();
-            for (UUID uuid : queue) {
+        Integer timer = timers.get(mode.id);
+        if (timer == null) {
+            timers.put(mode.id, mode.queueSeconds(settings));
+            for (UUID uuid : waiting) {
                 Player player = Bukkit.getPlayer(uuid);
                 if (player != null) {
-                    player.sendMessage(settings.chat("match-starting", "seconds", String.valueOf(settings.queueSeconds())));
+                    say(player, "match-starting", "seconds", String.valueOf(mode.queueSeconds(settings)));
                 }
             }
             return;
         }
-        queueTimer--;
-        int time = queueTimer;
-        if (time <= 0) {
+        timer--;
+        timers.put(mode.id, timer);
+        if (timer <= 0) {
             Arena arena = plugin.arenas().free();
             if (arena == null) {
-                queueTimer = VIP_TIMER_SECONDS;
+                timers.put(mode.id, VIP_TIMER_SECONDS);
                 return;
             }
-            int cap = Math.min(settings.maxPlayers(), plugin.settings().pillarCount());
+            int cap = Math.min(mode.maxPlayers(settings), settings.pillarCount());
             List<UUID> batch = new ArrayList<>();
-            for (UUID uuid : queue) {
+            for (UUID uuid : waiting) {
                 if (batch.size() >= cap) {
                     break;
                 }
                 batch.add(uuid);
             }
-            queue.removeAll(batch);
+            for (UUID uuid : batch) {
+                leaveQueue(uuid);
+            }
             arena.players.addAll(batch);
             arena.alive.addAll(batch);
-            queueTimer = null;
+            arena.gamemodeId = mode.id;
             beginStart(arena);
             return;
         }
-        if (time <= VIP_TIMER_SECONDS) {
-            for (UUID uuid : queue) {
+        if (timer <= VIP_TIMER_SECONDS) {
+            for (UUID uuid : waiting) {
                 Player player = Bukkit.getPlayer(uuid);
                 if (player == null) {
                     continue;
                 }
-                Text.title(player, settings.text("title-count", "time", String.valueOf(time)), settings.text("subtitle-count"), 1);
+                Text.title(player, settings.text("title-count", "time", String.valueOf(timer)), settings.text("subtitle-count"), 1);
                 Text.sound(player, settings.sound("countdown", "note.pling"), 1f, 1f);
             }
-        } else if (time == 20 || time == 10) {
-            lobby("match-starting-soon", "seconds", String.valueOf(time));
+        } else if (timer == 20 || timer == 10) {
+            lobby(null, "match-starting-soon", "seconds", String.valueOf(timer));
         }
+    }
+
+    private List<UUID> queue(String modeId) {
+        return queues.computeIfAbsent(modeId, id -> new ArrayList<>());
+    }
+
+    private boolean leaveQueue(UUID uuid) {
+        String modeId = queuedMode.remove(uuid);
+        if (modeId == null) {
+            return false;
+        }
+        List<UUID> waiting = queues.get(modeId);
+        if (waiting != null) {
+            waiting.remove(uuid);
+        }
+        return true;
     }
 
     private void tickArena(Arena arena) {
@@ -476,7 +647,7 @@ public final class Game {
             if (arena.grace > 0) {
                 arena.grace--;
                 if (arena.grace == 0) {
-                    arenaMessage(arena, settings.chat("grace-over"));
+                    arenaMessage(arena, null, "grace-over");
                 }
             }
             arena.item--;
@@ -493,7 +664,7 @@ public final class Game {
                     Text.actionBar(player, settings.text("action-item"));
                 }
                 if (arena.time >= settings.maxGameSeconds() && arena.time % LIGHTNING_EVERY == 0) {
-                    arenaMessage(arena, settings.chat("sudden-death"));
+                    arenaMessage(arena, null, "sudden-death");
                     for (Location pillar : arena.pillars) {
                         if (Math.random() < (LIGHTNING_CHANCE / 100.0) && pillar.getWorld() != null) {
                             pillar.getWorld().strikeLightning(pillar);
@@ -524,43 +695,51 @@ public final class Game {
 
     private void beginStart(Arena arena) {
         Settings settings = plugin.settings();
+        Gamemode mode = settings.gamemode(arena.gamemodeId);
+        int countdown = mode == null ? settings.countdown() : mode.countdown(settings);
         arena.state = Arena.State.STARTING;
-        arena.count = settings.countdown();
+        arena.count = countdown;
         plugin.pillars().build(arena);
-        int n = 1;
+        int players = arena.players.size();
+        int pillarCount = arena.pillars.size();
+        int index = 0;
         for (UUID uuid : arena.players) {
+            int slot = PillarSlots.slot(index, players, pillarCount);
+            int pillar = slot + 1;
+            index++;
             Session session = session(uuid);
             session.arenaId = arena.id;
             session.alive = true;
             session.kills = 0;
-            session.pillar = n;
+            session.pillar = pillar;
             plugin.database().ensure(uuid, nameOf(uuid));
             plugin.database().addGame(uuid);
             Player player = Bukkit.getPlayer(uuid);
-            if (player != null && n <= arena.pillars.size()) {
-                Location pillar = arena.pillars.get(n - 1);
-                Location stand = pillar.clone().add(0.5, 1.0, 0.5);
+            if (player != null && pillar <= pillarCount) {
+                Location stand = arena.pillars.get(slot).clone().add(0.5, 1.0, 0.5);
                 player.teleport(stand);
-                plugin.pillars().cage(arena, n, true);
+                plugin.pillars().cage(arena, pillar, true);
                 player.setGameMode(GameMode.ADVENTURE);
                 clearInventory(player);
                 heal(player);
                 clearEffects(player);
                 Text.title(player, settings.text("title-cages"),
-                        settings.text("subtitle-cages", "seconds", String.valueOf(settings.countdown())), 3);
+                        settings.text("subtitle-cages", "seconds", String.valueOf(countdown)), 3);
                 Text.sound(player, settings.sound("cages", "mob.wither.spawn"), 1f, 1.5f);
             }
-            n++;
         }
+        plugin.boards().refreshVisibility();
     }
 
     private void beginPlay(Arena arena) {
         Settings settings = plugin.settings();
         removeJunk(arena);
+        Gamemode mode = settings.gamemode(arena.gamemodeId);
+        int delay = mode == null ? settings.itemDelaySeconds() : mode.itemDelay(settings);
         arena.state = Arena.State.INGAME;
-        arena.item = settings.itemSeconds();
         arena.grace = settings.graceSeconds();
         arena.time = 0;
+        arena.item = delay > 0 ? delay : settings.itemSeconds();
         plugin.pillars().openAll(arena);
         for (UUID uuid : arena.alive) {
             Player player = Bukkit.getPlayer(uuid);
@@ -570,7 +749,9 @@ public final class Game {
             player.setGameMode(GameMode.SURVIVAL);
             Text.title(player, settings.text("title-fight"), settings.text("subtitle-fight"), 2);
             Text.sound(player, settings.sound("fight", "random.levelup"), 1f, 0.8f);
-            plugin.items().giveRandom(player);
+            if (delay <= 0) {
+                plugin.items().giveRandom(player);
+            }
         }
     }
 
@@ -595,7 +776,7 @@ public final class Game {
         arena.end = settings.endSeconds();
         arena.winner = winner;
         if (winner == null) {
-            arenaMessage(arena, settings.chat("no-winner"));
+            arenaMessage(arena, null, "no-winner");
             for (UUID uuid : arena.players) {
                 Player player = Bukkit.getPlayer(uuid);
                 if (player != null) {
@@ -616,7 +797,7 @@ public final class Game {
             Text.sound(winnerPlayer, settings.sound("victory", "random.levelup"), 1f, 1f);
             winnerPlayer.setPlayerListName(trimList(org.bukkit.ChatColor.GOLD + winnerPlayer.getName()));
         }
-        arenaMessage(arena, settings.chat("won", "player", name));
+        arenaMessage(arena, winnerPlayer, "won", "player", name);
         for (UUID uuid : arena.players) {
             if (uuid.equals(winner)) {
                 continue;
@@ -667,23 +848,33 @@ public final class Game {
         }
     }
 
-    private void arenaMessage(Arena arena, String message) {
-        for (UUID uuid : arena.players) {
-            Player player = Bukkit.getPlayer(uuid);
-            if (player != null) {
-                player.sendMessage(message);
-            }
+    private void say(Player player, String key, String... pairs) {
+        if (player != null) {
+            player.sendMessage(plugin.settings().chat(player, key, pairs));
         }
     }
 
-    private void lobby(String key, String... pairs) {
-        String message = plugin.settings().chat(key, pairs);
+    /** {@code about} is the player the line names. Null resolves placeholders for each recipient. */
+    private void arenaMessage(Arena arena, Player about, String key, String... pairs) {
+        String shared = about == null ? null : plugin.settings().chat(about, key, pairs);
+        for (UUID uuid : arena.players) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player == null) {
+                continue;
+            }
+            player.sendMessage(shared != null ? shared : plugin.settings().chat(player, key, pairs));
+        }
+    }
+
+    /** {@code about} is the player the line names. Null resolves placeholders for each lobby player. */
+    private void lobby(Player about, String key, String... pairs) {
+        String shared = about == null ? null : plugin.settings().chat(about, key, pairs);
         for (Player player : Bukkit.getOnlinePlayers()) {
             Session session = sessions.get(player.getUniqueId());
             if (session != null && (session.arenaId != 0 || session.alive)) {
                 continue;
             }
-            player.sendMessage(message);
+            player.sendMessage(shared != null ? shared : plugin.settings().chat(player, key, pairs));
         }
     }
 
@@ -736,6 +927,8 @@ public final class Game {
         public boolean alive;
         public int kills;
         public int pillar;
+        public UUID lastHitBy;
+        public long lastHitAt;
 
         Session(UUID uuid) {
             this.uuid = uuid;

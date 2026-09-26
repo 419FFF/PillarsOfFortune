@@ -14,6 +14,7 @@ import com.slop.pof.config.Settings;
 import com.slop.pof.papi.PofPlaceholders;
 import com.slop.pof.game.Fireballs;
 import com.slop.pof.game.Game;
+import com.slop.pof.game.GamemodeMenu;
 import com.slop.pof.game.Items;
 import com.slop.pof.listener.PoFListener;
 import com.slop.pof.lobby.LobbyStore;
@@ -33,6 +34,7 @@ public final class PoFPlugin extends JavaPlugin {
     private Fireballs fireballs;
     private Boards boards;
     private Game game;
+    private GamemodeMenu menus;
     private BukkitTask task;
     private boolean debug;
     private int ticks;
@@ -43,6 +45,7 @@ public final class PoFPlugin extends JavaPlugin {
         reloadConfig();
         ConfigUpdater.update(this);
         settings = Settings.from(getConfig());
+        settings.warnAboutConfig(getLogger(), getConfig());
         if (settings.lobbyWorld().equalsIgnoreCase(settings.gameWorld())) {
             getLogger().severe("worlds.game-name must be different from worlds.lobby-name.");
             getServer().getPluginManager().disablePlugin(this);
@@ -80,6 +83,8 @@ public final class PoFPlugin extends JavaPlugin {
         fireballs = new Fireballs(this);
         boards = new Boards(this);
         game = new Game(this);
+        menus = new GamemodeMenu(this);
+        getServer().getPluginManager().registerEvents(menus, this);
         game.refreshTop();
         if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {
             if (new PofPlaceholders(this).register()) {
@@ -143,6 +148,7 @@ public final class PoFPlugin extends JavaPlugin {
         }
         boolean restart = !next.worldSignature().equals(settings.worldSignature());
         settings = next;
+        settings.warnAboutConfig(getLogger(), getConfig());
         if (arenas.applyReload()) {
             restart = true;
         }
@@ -238,6 +244,10 @@ public final class PoFPlugin extends JavaPlugin {
 
     public Game game() {
         return game;
+    }
+
+    public GamemodeMenu menus() {
+        return menus;
     }
 
     public boolean isDebug() {

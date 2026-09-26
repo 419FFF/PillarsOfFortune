@@ -321,10 +321,18 @@ public final class Items {
         if (mapped != null && !mapped.isBlank()) {
             return Amounts.roll(mapped, random);
         }
+        if (pool == 2 && isLog(spec.material)) {
+            int logMax = Math.max(1, settings.blockMin() - 1);
+            return Rolls.blockAmount(1 + random.nextInt(100), 1, logMax);
+        }
         if (pool == 2) {
             return Rolls.blockAmount(1 + random.nextInt(100), settings.blockMin(), settings.blockMax());
         }
         return settings.defaultAmount();
+    }
+
+    private static boolean isLog(Material material) {
+        return material == Material.LOG || material == Material.LOG_2;
     }
 
     private Material fallback(int pool, Settings settings) {

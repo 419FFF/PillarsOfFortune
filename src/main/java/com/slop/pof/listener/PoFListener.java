@@ -47,7 +47,7 @@ public final class PoFListener implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        event.setJoinMessage(plugin.settings().raw("join-message", "player", player.getName()));
+        event.setJoinMessage(plugin.settings().raw(player, "join-message", "player", player.getName()));
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             if (player.isOnline()) {
                 plugin.game().handleJoin(player);
@@ -58,7 +58,7 @@ public final class PoFListener implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        event.setQuitMessage(plugin.settings().raw("quit-message", "player", player.getName()));
+        event.setQuitMessage(plugin.settings().raw(player, "quit-message", "player", player.getName()));
         plugin.game().handleQuit(player);
     }
 
@@ -99,6 +99,7 @@ public final class PoFListener implements Listener {
                     && holdingRod(attacker)) {
                 consumeRod(attacker);
             }
+            plugin.game().tagAttacker(victim, attacker);
         }
         if (victim.getHealth() - event.getFinalDamage() < 1) {
             event.setCancelled(true);
@@ -299,18 +300,16 @@ public final class PoFListener implements Listener {
             return;
         }
         event.setCancelled(true);
+        Player speaker = event.getPlayer();
         String message = event.getMessage();
         int arenaId = session.arenaId;
         boolean alive = session.alive;
-        String name = event.getPlayer().getName();
         Bukkit.getScheduler().runTask(plugin, () -> {
             Arena arena = plugin.arenas().get(arenaId);
             if (arena == null) {
                 return;
             }
-            String line = alive
-                    ? plugin.settings().text("chat-alive", "player", name, "message", message)
-                    : plugin.settings().text("chat-spec", "player", name, "message", message);
+            String line = plugin.settings().chatLine(speaker, alive ? "chat-alive" : "chat-spec", message);
             for (UUID member : arena.players) {
                 Player target = Bukkit.getPlayer(member);
                 if (target != null) {

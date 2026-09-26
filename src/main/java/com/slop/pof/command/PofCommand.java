@@ -50,16 +50,16 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
             case "arenas" -> arenas(sender);
             case "debug" -> debug(sender);
             case "reload" -> reload(sender);
-            default -> sender.sendMessage(settings.chat("unknown"));
+            default -> tell(sender, "unknown");
         }
         return true;
     }
 
     private void help(CommandSender sender, Settings settings) {
         if (sender instanceof Player player) {
-            player.sendMessage(settings.chat("help"));
+            tell(player, "help");
             if (player.hasPermission(Perms.ADMIN)) {
-                player.sendMessage(settings.chat("help-admin"));
+                tell(player, "help-admin");
             }
         } else {
             sender.sendMessage(settings.text("help-console"));
@@ -68,7 +68,7 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
 
     private void join(CommandSender sender) {
         if (!(sender instanceof Player player)) {
-            sender.sendMessage(plugin.settings().chat("players-only"));
+            tell(sender, "players-only");
             return;
         }
         plugin.game().join(player);
@@ -76,95 +76,92 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
 
     private void leave(CommandSender sender) {
         if (!(sender instanceof Player player)) {
-            sender.sendMessage(plugin.settings().chat("players-only"));
+            tell(sender, "players-only");
             return;
         }
         if (!player.hasPermission(Perms.PLAY)) {
-            player.sendMessage(plugin.settings().chat("no-permission"));
+            tell(player, "no-permission");
             return;
         }
         plugin.game().leave(player);
     }
 
     private void stats(CommandSender sender, String[] args) {
-        Settings settings = plugin.settings();
         if (args.length < 2) {
             if (!(sender instanceof Player player)) {
-                sender.sendMessage(settings.chat("players-only"));
+                tell(sender, "players-only");
                 return;
             }
             if (!player.hasPermission(Perms.PLAY)) {
-                player.sendMessage(settings.chat("no-permission"));
+                tell(player, "no-permission");
                 return;
             }
             plugin.database().ensure(player.getUniqueId(), player.getName());
-            showStats(sender, plugin.database().get(player.getUniqueId()), player.getName());
+            showStats(sender, plugin.database().get(player.getUniqueId()), player.getName(), player);
             return;
         }
         if (sender instanceof Player player && !player.hasPermission(Perms.STATS_OTHERS)) {
-            player.sendMessage(settings.chat("no-permission"));
+            tell(player, "no-permission");
             return;
         }
         Player online = Bukkit.getPlayer(args[1]);
         if (online != null) {
             plugin.database().ensure(online.getUniqueId(), online.getName());
-            showStats(sender, plugin.database().get(online.getUniqueId()), online.getName());
+            showStats(sender, plugin.database().get(online.getUniqueId()), online.getName(), online);
             return;
         }
         Stats found = plugin.database().findByName(args[1]);
         if (found == null) {
-            sender.sendMessage(settings.chat("player-not-found"));
+            tell(sender, "player-not-found");
             return;
         }
-        showStats(sender, found, found.name);
+        showStats(sender, found, found.name, Bukkit.getPlayerExact(found.name));
     }
 
-    private void showStats(CommandSender sender, Stats stats, String name) {
-        Settings settings = plugin.settings();
+    private void showStats(CommandSender sender, Stats stats, String name, Player about) {
         if (stats == null) {
-            sender.sendMessage(settings.chat("player-not-found"));
+            tell(sender, "player-not-found");
             return;
         }
-        sender.sendMessage(settings.chat("stats-header", "player", name));
-        sender.sendMessage(settings.chat("stats-line1",
+        tell(sender, about, "stats-header", "player", name);
+        tell(sender, about, "stats-line1",
                 "wins", String.valueOf(stats.wins),
                 "kills", String.valueOf(stats.kills),
-                "deaths", String.valueOf(stats.deaths)));
-        sender.sendMessage(settings.chat("stats-line2",
+                "deaths", String.valueOf(stats.deaths));
+        tell(sender, about, "stats-line2",
                 "games", String.valueOf(stats.games),
                 "streak", String.valueOf(stats.streak),
-                "best", String.valueOf(stats.bestStreak)));
-        sender.sendMessage(settings.chat("stats-line3",
+                "best", String.valueOf(stats.bestStreak));
+        tell(sender, about, "stats-line3",
                 "items", String.valueOf(stats.items),
-                "mins", String.valueOf(stats.playtimeMin)));
+                "mins", String.valueOf(stats.playtimeMin));
     }
 
     private void top(CommandSender sender) {
-        Settings settings = plugin.settings();
         if (sender instanceof Player player && !player.hasPermission(Perms.PLAY)) {
-            player.sendMessage(settings.chat("no-permission"));
+            tell(player, "no-permission");
             return;
         }
         plugin.game().refreshTop();
         if (!plugin.game().topReady()) {
-            sender.sendMessage(settings.chat("top-error"));
+            tell(sender, "top-error");
             return;
         }
         List<TopEntry> rows = plugin.game().top();
-        sender.sendMessage(settings.chat("top-header"));
+        tell(sender, "top-header");
         if (rows.isEmpty()) {
-            sender.sendMessage(settings.chat("top-empty"));
+            tell(sender, "top-empty");
         } else {
             int rank = 1;
             for (TopEntry row : rows) {
-                sender.sendMessage(settings.chat("top-line",
+                tell(sender, Bukkit.getPlayerExact(row.name), "top-line",
                         "rank", String.valueOf(rank++),
                         "player", row.name,
-                        "wins", String.valueOf(row.wins)));
+                        "wins", String.valueOf(row.wins));
             }
         }
         if (plugin.isDebug()) {
-            sender.sendMessage(settings.chat("debug-line", "message", "rows=" + rows.size()));
+            tell(sender, "debug-line", "message", "rows=" + rows.size());
         }
     }
 
@@ -178,7 +175,7 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
 
     private void stop(CommandSender sender, String[] args) {
         if (!sender.hasPermission(Perms.ADMIN)) {
-            sender.sendMessage(plugin.settings().chat("no-permission"));
+            tell(sender, "no-permission");
             return;
         }
         Settings settings = plugin.settings();
@@ -187,46 +184,45 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
             try {
                 id = Integer.parseInt(args[1]);
             } catch (NumberFormatException ex) {
-                sender.sendMessage(settings.chat("arena-missing", "id", args[1]));
+                tell(sender, "arena-missing", "id", args[1]);
                 return;
             }
             if (!plugin.game().stopArena(id)) {
-                sender.sendMessage(settings.chat("arena-missing", "id", args[1]));
+                tell(sender, "arena-missing", "id", args[1]);
                 return;
             }
-            sender.sendMessage(settings.chat("stopped-arena", "id", String.valueOf(id)));
+            tell(sender, "stopped-arena", "id", String.valueOf(id));
             return;
         }
         plugin.game().stopAll();
         if (sender instanceof Player) {
-            sender.sendMessage(settings.chat("stopped-all"));
+            tell(sender, "stopped-all");
         } else {
             sender.sendMessage(settings.text("stopped-all-console"));
         }
     }
 
     private void setLobby(CommandSender sender) {
-        Settings settings = plugin.settings();
         if (!(sender instanceof Player player)) {
-            sender.sendMessage(settings.chat("players-only"));
+            tell(sender, "players-only");
             return;
         }
         if (!player.hasPermission(Perms.ADMIN)) {
-            player.sendMessage(settings.chat("no-permission"));
+            tell(player, "no-permission");
             return;
         }
         plugin.lobby().save(player.getLocation());
-        player.sendMessage(settings.chat("lobby-set"));
+        tell(player, "lobby-set");
     }
 
     private void regen(CommandSender sender) {
         if (!sender.hasPermission(Perms.ADMIN)) {
-            sender.sendMessage(plugin.settings().chat("no-permission"));
+            tell(sender, "no-permission");
             return;
         }
         plugin.game().regen();
         if (sender instanceof Player) {
-            sender.sendMessage(plugin.settings().chat("regen-done"));
+            tell(sender, "regen-done");
         } else {
             sender.sendMessage(plugin.settings().text("regen-done-console"));
         }
@@ -234,17 +230,17 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
 
     private void arenas(CommandSender sender) {
         if (!sender.hasPermission(Perms.ADMIN)) {
-            sender.sendMessage(plugin.settings().chat("no-permission"));
+            tell(sender, "no-permission");
             return;
         }
         Settings settings = plugin.settings();
         boolean player = sender instanceof Player;
         for (Arena arena : plugin.arenas().all()) {
             if (player) {
-                sender.sendMessage(settings.chat("arena-line",
+                tell(sender, "arena-line",
                         "id", String.valueOf(arena.id),
                         "state", arena.state.name(),
-                        "alive", String.valueOf(arena.aliveCount())));
+                        "alive", String.valueOf(arena.aliveCount()));
             } else {
                 sender.sendMessage(settings.text("arena-line-console",
                         "id", String.valueOf(arena.id),
@@ -256,26 +252,26 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
 
     private void debug(CommandSender sender) {
         if (!sender.hasPermission(Perms.ADMIN)) {
-            sender.sendMessage(plugin.settings().chat("no-permission"));
+            tell(sender, "no-permission");
             return;
         }
         plugin.setDebug(!plugin.isDebug());
-        sender.sendMessage(plugin.settings().chat(plugin.isDebug() ? "debug-on" : "debug-off"));
+        tell(sender, plugin.isDebug() ? "debug-on" : "debug-off");
     }
 
     private void reload(CommandSender sender) {
         if (!sender.hasPermission(Perms.ADMIN)) {
-            sender.sendMessage(plugin.settings().chat("no-permission"));
+            tell(sender, "no-permission");
             return;
         }
         try {
             boolean restart = plugin.reloadPlugin();
-            sender.sendMessage(plugin.settings().chat("reloaded"));
+            tell(sender, "reloaded");
             if (restart) {
-                sender.sendMessage(plugin.settings().chat("restart-required"));
+                tell(sender, "restart-required");
             }
         } catch (RuntimeException ex) {
-            sender.sendMessage(plugin.settings().chat("storage-failed"));
+            tell(sender, "storage-failed");
         }
     }
 
@@ -300,6 +296,16 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
             return filter(ids, args[1]);
         }
         return List.of();
+    }
+
+    /** Plugin chat for the sender. Placeholders use that player when the sender is a player. */
+    private void tell(CommandSender sender, String key, String... pairs) {
+        tell(sender, sender instanceof Player player ? player : null, key, pairs);
+    }
+
+    /** Plugin chat about {@code about}. Offline or console subjects leave LuckPerms tokens empty. */
+    private void tell(CommandSender sender, Player about, String key, String... pairs) {
+        sender.sendMessage(plugin.settings().chat(about, key, pairs));
     }
 
     private static List<String> filter(List<String> options, String prefix) {

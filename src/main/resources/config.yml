@@ -1,10 +1,10 @@
 # Pillars of Fortune
 # Edit this file, then run /pof reload. A restart is only needed when the note in chat says so.
 #
-# config-version tells the plugin which keys this file already has.
-# DO NOT CHANGE config-version. The plugin updates it when a newer jar adds options.
-# Your existing values are kept. New keys are filled in from the defaults.
-config-version: 2
+# config-version is how far this file has been upgraded.
+# DO NOT CHANGE config-version. On startup and /pof reload the plugin walks an older
+# number forward to this jar's version, keeps your values, and writes config.yml.vN.bak first.
+config-version: 8
 
 # Chat prefix placed in front of plugin messages. Use & color codes.
 prefix: "&8[&6PoF&8]&r"
@@ -74,17 +74,22 @@ clear-height: 120
 max-build-y: 120
 # Distance from the arena center at which a living player is eliminated.
 border-kill: 70
+# If a player falls into the void or past the border within this many seconds of being hit,
+# the last player who hit them gets the kill. 0 disables that credit.
+void-credit-seconds: 10
 
 # Queue will not start a match until at least this many people are waiting.
 min-players: 2
 # Most players taken from the queue into one match. Also limited by pillars.count.
 max-players: 12
 # Seconds the cages stay closed after the match is assigned.
-countdown: 15
+countdown: 10
 # Seconds to wait in queue once enough players are ready. VIP /pof start can cut this to 5.
 queue-seconds: 30
-# Seconds between item drops. Sudden death shortens this to 2 seconds.
+# Seconds between item drops after the first one. Sudden death shortens this to 2 seconds.
 item-seconds: 5
+# Seconds after the cages open before the first items are given. 0 gives an item immediately.
+item-delay-seconds: 3
 # Seconds at the start of a round with no damage.
 grace-seconds: 5
 # Seconds to show the winner before players return to the lobby and the arena is wiped.
@@ -94,11 +99,28 @@ max-game-seconds: 600
 # Gamemode used in the lobby and inside closed cages. Use a Bukkit name such as ADVENTURE or SURVIVAL.
 lobby-gamemode: ADVENTURE
 
+# Queues players can join. enabled: true means it can be selected.
+# One enabled gamemode joins immediately. Two or more open a chest menu.
+# Leave min-players, max-players, countdown, queue-seconds, or item-delay-seconds out to use the global values.
+gamemodes:
+  classic:
+    enabled: true
+    name: "&6Classic"
+    icon: NETHER_STAR
+  custom:
+    enabled: false
+    name: "&bCustom"
+    icon: DIAMOND
+    min-players: 2
+    max-players: 8
+    countdown: 10
+    item-delay-seconds: 5
+
 # Fire charges thrown by living players during a round.
 # Right-click launches a fireball along the crosshair. On impact, players are pushed away from the
 # blast (not just north/south/east/west) and take the damage below once. Vanilla explosion damage is cancelled.
 fireball:
-  # Blocks per tick along the look direction. 1.6 is a BedWars-style throw. Higher is faster.
+  # Blocks per tick along the look direction. Higher is faster.
   speed: 1.6
   # Horizontal launch strength away from the explosion. Closer players are pushed harder.
   knockback-horizontal: 2.6
@@ -186,17 +208,27 @@ sounds:
   fireball: mob.ghast.fireball
 
 # Every player-facing string. {placeholders} are filled in by the plugin. & codes are colors.
-# {prefix} is only used by the join and quit lines, which already include the prefix.
+# {prefix} is this plugin's chat prefix (the prefix: key above). It is not the LuckPerms prefix.
+# {luckperms_prefix} and {luckperms_suffix} are that player's LuckPerms meta when LuckPerms is installed.
+# %placeholder% tokens are PlaceholderAPI, resolved for the player the line is about.
+# %luckperms_prefix% and %luckperms_suffix% work the same way when that expansion is installed.
+# Arena chat inserts {message} after placeholders run, so typed chat cannot inject them.
 messages:
   reloaded: "&aConfig reloaded."
   no-permission: "&cNo permission."
   players-only: "&cOnly players can do that."
   already-in-match: "&cYou are already in a match."
   already-queued: "&7Already in the queue."
-  queued: "&eQueued. &7Players waiting: &f{count}&7/&f{max}"
-  queue-join-broadcast: "&e{player} &7joined the queue &8(&f{count}&7/&f{max}&8)"
+  queued: "&eQueued for {mode}&e. &7Players waiting: &f{count}&7/&f{max}"
+  queue-join-broadcast: "&e{player} &7joined the {mode} queue &8(&f{count}&7/&f{max}&8)"
   queue-leave: "&7Left the queue."
-  queue-leave-broadcast: "&e{player} &7left the queue &8(&f{count}&7/&f{max}&8)"
+  queue-leave-broadcast: "&e{player} &7left the {mode} queue &8(&f{count}&7/&f{max}&8)"
+  # Chest title when more than one gamemode is enabled. 32 characters max, colors included.
+  gamemode-title: "&6Choose a mode"
+  gamemode-none: "&cNo gamemode is enabled."
+  gamemode-lore-players: "&7Players: &f{min}&7-&f{max}"
+  gamemode-lore-start: "&7Cages: &f{seconds}s"
+  gamemode-lore-items: "&7Items after: &f{seconds}s"
   nothing-to-leave: "&7Nothing to leave."
   forfeited: "&7You forfeited."
   cannot-during-match: "&cYou cannot use that during a match."
@@ -231,6 +263,8 @@ messages:
   arena-missing: "&cNo arena with id {id}."
   unknown: "&cUnknown subcommand. &7/pof"
   elim-void: "&e{player} &7fell into the void."
+  # Used instead of elim-void when someone else knocked them off. {player} and {killer}.
+  elim-void-kill: "&e{player} &7was knocked into the void by &c{killer}"
   elim-leave: "&e{player} &7forfeited."
   elim-death: "&e{player} &7was eliminated."
   slain: "&e{victim} &7was slain by &c{killer}"
@@ -258,35 +292,37 @@ messages:
   title-start-count: "&6{time}"
   subtitle-start-count: "&7Get ready"
   join-hint: "&7Right-click the &equeue item &7or type &e/pof join&7."
-  join-message: "{prefix} &e{player} &7joined."
-  quit-message: "{prefix} &e{player} &7left."
+  join-message: "{prefix} {luckperms_prefix}&e{player} &7joined."
+  quit-message: "{prefix} {luckperms_prefix}&e{player} &7left."
   restart-required: "&cA full restart is required before every arena uses the new arena or pillar settings."
   reload-waiting-only: "&eActive matches were left running. New settings apply to waiting arenas."
   storage-failed: "&cStorage reconnect failed. The previous database is still in use."
-  chat-alive: "&8[&6PoF&8] &f{player}&8: &7{message}"
-  chat-spec: "&8[&7SPEC&8] &8{player}&8: &7{message}"
-  tab-header-lobby: "&6&lPILLARS OF FORTUNE"
-  tab-footer-lobby: "&7Queue &f{queue} &8| &7Online &f{online} &8| &e{ip}"
-  tab-header-arena: "&6&lPILLARS OF FORTUNE &8- &7Arena {id}"
-  tab-footer-arena: "&f{state} &8| &e{alive} alive &8| &e{ip}"
-  board-title-lobby: "&6&lPILLARS"
-  board-title-starting: "&6&lSTARTING"
-  board-title-finished: "&6&lFINISHED"
-  board-title-fortune: "&6&lFORTUNE"
-  board-join: "&6/pof join"
-  board-wins: "&fWins: &e{value}"
-  board-kills: "&fKills: &e{value}"
-  board-streak: "&fStreak: &e{value}"
+  chat-alive: "&8[&6PoF&8] {luckperms_prefix}&f{player}&8: &7{message}"
+  chat-spec: "&8[&7SPEC&8] {luckperms_prefix}&8{player}&8: &7{message}"
+  # \n starts a new line. Header and footer need ProtocolLib on 1.8.8.
+  # Lobby: {ip} {queue} {max} {online}
+  tab-header-lobby: "&6&lPILLARS OF FORTUNE\n&8&m          &r &7{ip} &8&m          "
+  tab-footer-lobby: "&7Queue &f{queue}&7/&f{max} &8| &7Lobby &f{online}\n&eGold &7queued &8- &7Gray lobby"
+  # Arena: {id} {state} {alive} {time} {ip} {online}. {state} is already colored.
+  tab-header-arena: "&6&lPILLARS OF FORTUNE\n&7Arena &f{id} &8- {state}"
+  tab-footer-arena: "&a{alive} &7alive &8| &f{time}\n&7{ip}"
+  # Sidebar, same idea as the tab header: \n starts a new line, top to bottom.
+  # The first line is the title (32 characters). Each line under it is 32 characters. At most 15 of those.
+  # A blank line leaves a gap. {luckperms_prefix}, {luckperms_suffix}, and %placeholder% use the viewer.
+  # Every mode: {ip} {wins} {kills} {deaths} {streak} {best} {games} {items} {mins} {queue} {max} {mode}
+  # {start} is board-start, or board-start-waiting while that queue is still short.
+  # In a match: {id} {alive} {starts} {item} {time} {grace} {session_kills} {state} {clock}
+  # {state} is already colored. {clock} is m:ss. {starts} {item} {time} {grace} are seconds.
+  board-lobby: "&6&lPILLARS\n&6/pof join\n&fWins: &e{wins}\n&fKills: &e{kills}\n&fStreak: &e{streak}\n&8\n&e{ip}"
+  board-queued: "&6&lPILLARS\n{start}\n&fQueue: &e{queue}&7/&f{max}\n&8\n&e{ip}"
+  board-starting: "&6&lSTARTING\n&fArena: &e{id}\n&fStarts: &e{starts}s\n&fAlive: &e{alive}\n&8\n&e{ip}"
+  board-grace: "&6&lFORTUNE\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n&aGrace: &f{grace}s\n&8\n&e{ip}"
+  board-ingame: "&6&lFORTUNE\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n&8\n&e{ip}"
+  board-ending: "&6&lFINISHED\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&8\n&e{ip}"
+  # {value} is the countdown in seconds. {start} inserts one of these two lines.
   board-start: "&fStart: &e{value}s"
-  board-queue: "&fQueue: &e{count}&7/&f{max}"
-  board-arena: "&fArena: &e{value}"
-  board-starts: "&fStarts: &e{value}s"
-  board-alive: "&fAlive: &e{value}"
-  board-item: "&fItem: &e{value}s"
-  board-time: "&fTime: &e{value}s"
-  board-grace: "&aGrace: &f{value}s"
-  board-pad: "&8"
-  board-ip: "&e{ip}"
+  # Shown through {start} while the queue does not have enough players.
+  board-start-waiting: "&fStart: &eWaiting for player"
 
 # Item pools. A line is a Bukkit 1.8 material. Repeating a line makes that item more common.
 # Extra options go after | and can be combined:
@@ -309,6 +345,8 @@ items:
     SNOW_BALL: "1-2"
     TNT: "1"
     ENDER_PEARL: "1"
+    # Logs stay below block-min so a log stack is smaller than any other block stack.
+    LOG: "1-3"
   # Per-material chance to give the item at all. Missing entries are 100, except ender pearls, which use pearl-chance.
   chances:
     ENDER_PEARL: 15

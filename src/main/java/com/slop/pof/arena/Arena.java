@@ -28,6 +28,7 @@ public final class Arena {
     public int time;
     public int end;
     public UUID winner;
+    public String gamemodeId;
 
     public Arena(int id, int centerX, int centerZ) {
         this.id = id;

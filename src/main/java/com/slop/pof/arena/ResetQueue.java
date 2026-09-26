@@ -178,6 +178,7 @@ public final class ResetQueue {
         active.players.clear();
         active.alive.clear();
         active.winner = null;
+        active.gamemodeId = null;
         active.count = 0;
         active.item = 0;
         active.grace = 0;

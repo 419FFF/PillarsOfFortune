@@ -7,7 +7,7 @@ author: example.com
 website: example.com
 description: Pillars of Fortune
 # The plugin starts without these. It uses them only when they are installed.
-softdepend: [ProtocolLib, PlaceholderAPI]
+softdepend: [ProtocolLib, PlaceholderAPI, LuckPerms]
 commands:
   pof:
     description: Pillars of Fortune
