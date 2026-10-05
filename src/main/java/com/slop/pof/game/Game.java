@@ -11,12 +11,15 @@ import com.slop.pof.PoFPlugin;
 import com.slop.pof.arena.Arena;
 import com.slop.pof.arena.PillarSlots;
 import com.slop.pof.config.Gamemode;
+import com.slop.pof.config.Levels;
 import com.slop.pof.config.Settings;
+import com.slop.pof.storage.Leaderboard;
 import com.slop.pof.storage.Stats;
 import com.slop.pof.storage.TopEntry;
 import com.slop.pof.util.Text;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -38,8 +41,9 @@ public final class Game {
     private final Map<String, Integer> timers = new HashMap<>();
     private final Map<UUID, String> queuedMode = new HashMap<>();
     private final Set<String> arenasBusy = new HashSet<>();
-    private List<TopEntry> top = List.of();
+    private final Map<Leaderboard, List<TopEntry>> boards = new EnumMap<>(Leaderboard.class);
     private boolean topReady;
+    private int reminderTick;
 
     public Game(PoFPlugin plugin) {
         this.plugin = plugin;
@@ -149,15 +153,24 @@ public final class Game {
     }
 
     public List<TopEntry> top() {
+        return top(Leaderboard.WINS);
+    }
+
+    /** Cached rows for one board. Refreshes the cache when it is cold. */
+    public List<TopEntry> top(Leaderboard board) {
+        Leaderboard kind = board == null ? Leaderboard.WINS : board;
         if (!topReady) {
             refreshTop();
         }
-        return top;
+        return boards.getOrDefault(kind, List.of());
     }
 
     public void refreshTop() {
         try {
-            top = plugin.database().top(plugin.settings().leaderboardSize());
+            int size = plugin.settings().leaderboardSize();
+            for (Leaderboard kind : Leaderboard.values()) {
+                boards.put(kind, plugin.database().top(kind, size));
+            }
             topReady = true;
         } catch (RuntimeException ex) {
             plugin.getLogger().warning("Leaderboard refresh failed: " + ex.getMessage());
@@ -172,6 +185,7 @@ public final class Game {
         plugin.database().ensure(player.getUniqueId(), player.getName());
         session(player);
         toLobby(player);
+        applyXpBar(player);
         plugin.boards().refresh(player);
         say(player, "join-hint");
     }
@@ -450,6 +464,7 @@ public final class Game {
     }
 
     public void second() {
+        reminderTick++;
         tryStart();
         for (Arena arena : plugin.arenas().all()) {
             tickArena(arena);
@@ -487,12 +502,130 @@ public final class Game {
         boolean onlineOnly = plugin.settings().playtimeOnlineOnly();
         for (Player player : Bukkit.getOnlinePlayers()) {
             Session session = sessions.get(player.getUniqueId());
-            if (!onlineOnly && (session == null || session.arenaId == 0)) {
+            boolean inMatch = session != null && session.arenaId != 0;
+            if (!onlineOnly && !inMatch) {
                 continue;
             }
             plugin.database().ensure(player.getUniqueId(), player.getName());
             plugin.database().addPlaytime(player.getUniqueId());
+            if (inMatch) {
+                // XP is only earned inside a match, never in the lobby.
+                awardXp(player, plugin.settings().levels().xpPerMinute(), "xp-minute");
+            }
         }
+    }
+
+    /** Pushes the stored level and progress onto the vanilla XP bar. */
+    public void applyXpBar(Player player) {
+        if (player == null || !player.isOnline()) {
+            return;
+        }
+        Levels levels = plugin.settings().levels();
+        if (!levels.enabled()) {
+            return;
+        }
+        Stats stats = plugin.database().get(player.getUniqueId());
+        int level = stats == null ? 1 : Math.max(1, stats.level);
+        int xp = stats == null ? 0 : Math.max(0, stats.xp);
+        player.setLevel(level);
+        player.setExp((float) levels.progress(level, xp));
+    }
+
+    /**
+     * Adds XP, rolls any level-up, saves it, and reports it. {@code messageKey} is the chat line
+     * for this source, such as {@code xp-win}, so each source can be worded in config.
+     */
+    public void awardXp(Player player, int amount, String messageKey) {
+        if (player == null || amount <= 0) {
+            return;
+        }
+        if (!plugin.settings().levels().enabled()) {
+            return;
+        }
+        applyXp(player, amount);
+        say(player, messageKey, "xp", String.valueOf(amount));
+    }
+
+    /**
+     * Win XP, with the winstreak part shown in parentheses next to the base amount, for example
+     * {@code +100 XP (win) (+20 XP streak)}.
+     */
+    public void awardWinXp(Player player, int streak) {
+        if (player == null) {
+            return;
+        }
+        Levels levels = plugin.settings().levels();
+        if (!levels.enabled()) {
+            return;
+        }
+        int base = levels.baseWinXp();
+        int total = levels.winXp(streak);
+        int bonus = Math.max(0, total - base);
+        applyXp(player, total);
+        StringBuilder line = new StringBuilder(
+                plugin.settings().text(player, "xp-win", "xp", String.valueOf(base)));
+        if (bonus > 0) {
+            line.append(' ').append(plugin.settings().text(player, "xp-win-bonus",
+                    "bonus", String.valueOf(bonus), "streak", String.valueOf(Math.max(1, streak))));
+        }
+        player.sendMessage(line.toString());
+    }
+
+    /** Applies XP and returns the new level, without sending a chat line. */
+    private int applyXp(Player player, int amount) {
+        Levels levels = plugin.settings().levels();
+        Stats stats = plugin.database().ensure(player.getUniqueId(), player.getName());
+        Levels.Roll roll = levels.roll(stats.level, stats.xp, amount);
+        boolean leveled = roll.level() > stats.level;
+        plugin.database().setLevelXp(player.getUniqueId(), roll.level(), roll.xp());
+        applyXpBar(player);
+        if (leveled) {
+            say(player, "level-up", "level", String.valueOf(roll.level()));
+            Text.sound(player, plugin.settings().sound("level-up", "random.levelup"), 1f, 1.2f);
+            Text.title(player, plugin.settings().text("title-level-up"),
+                    plugin.settings().text("subtitle-level-up", "level", String.valueOf(roll.level())), 3);
+        }
+        plugin.boards().refresh(player);
+        return roll.level();
+    }
+
+    /** Admin: adds XP to a stored player, online or not. */
+    public void giveXp(Player online, UUID target, int amount) {
+        if (amount <= 0) {
+            return;
+        }
+        if (online != null) {
+            awardXp(online, amount, "xp-admin");
+            return;
+        }
+        Stats stats = plugin.database().ensure(target, nameOf(target));
+        Levels.Roll roll = plugin.settings().levels().roll(stats.level, stats.xp, amount);
+        plugin.database().setLevelXp(target, roll.level(), roll.xp());
+    }
+
+    /** Admin: sets the XP inside the current level. An overflow rolls into the next level. */
+    public void setXp(Player online, UUID target, int amount) {
+        Stats stats = plugin.database().ensure(target, online == null ? nameOf(target) : online.getName());
+        Levels.Roll roll = plugin.settings().levels().roll(stats.level, 0, Math.max(0, amount));
+        plugin.database().setLevelXp(target, roll.level(), roll.xp());
+        afterAdminXp(online, roll.level());
+    }
+
+    /** Admin: sets the level, keeping the XP already inside it. */
+    public void setLevel(Player online, UUID target, int level) {
+        Stats stats = plugin.database().ensure(target, online == null ? nameOf(target) : online.getName());
+        int safe = Math.max(1, level);
+        plugin.database().setLevelXp(target, safe, stats.xp);
+        afterAdminXp(online, safe);
+    }
+
+    private void afterAdminXp(Player online, int level) {
+        if (online == null) {
+            return;
+        }
+        applyXpBar(online);
+        say(online, "level-up", "level", String.valueOf(level));
+        plugin.boards().refresh(online);
     }
 
     public void eliminate(Player player, String reason) {
@@ -568,6 +701,7 @@ public final class Game {
         plugin.database().addKill(attacker.getUniqueId());
         session(attacker).kills++;
         Text.sound(attacker, plugin.settings().sound("kill", "random.orb"), 1f, 1.4f);
+        awardXp(attacker, plugin.settings().levels().xpPerKill(), "xp-kill");
         return true;
     }
 
@@ -605,6 +739,7 @@ public final class Game {
         if (waiting.size() < min) {
             timers.remove(mode.id);
             arenasBusy.remove(mode.id);
+            remind(mode, waiting, min);
             return;
         }
         Integer timer = timers.get(mode.id);
@@ -665,13 +800,56 @@ public final class Game {
                 Text.title(player, settings.text("title-count", "time", String.valueOf(timer)), settings.text("subtitle-count"), 1);
                 Text.sound(player, settings.sound("countdown", "note.pling"), 1f, 1f);
             }
-        } else if (timer == 20 || timer == 10) {
-            lobby(null, "match-starting-soon", "seconds", String.valueOf(timer));
+        } else if (plugin.settings().broadcastAt(timer)) {
+            for (UUID uuid : waiting) {
+                Player player = Bukkit.getPlayer(uuid);
+                if (player != null) {
+                    say(player, "match-starting-soon", "seconds", String.valueOf(timer), "mode", Text.color(mode.name));
+                }
+            }
         }
     }
 
     private List<UUID> queue(String modeId) {
         return queues.computeIfAbsent(modeId, id -> new ArrayList<>());
+    }
+
+    private Gamemode modeOf(Arena arena) {
+        return arena == null ? null : plugin.settings().gamemode(arena.gamemodeId);
+    }
+
+    /** Modes without random drops (Rush) give a fixed kit instead. */
+    private boolean randomItems(Arena arena) {
+        Gamemode mode = modeOf(arena);
+        return mode == null || mode.randomItems();
+    }
+
+    /** Nudges the people in a queue that is still short of the minimum player count. */
+    private void remind(Gamemode mode, List<UUID> waiting, int min) {
+        if (waiting.isEmpty()) {
+            return;
+        }
+        // A lone player is reminded far less often than a queue that only needs one more person.
+        boolean alone = waiting.size() == 1;
+        int every = Math.max(5, alone
+                ? plugin.settings().queueAloneSeconds()
+                : plugin.settings().queueReminderSeconds());
+        if (reminderTick % every != 0) {
+            return;
+        }
+        String label = Text.color(mode.name);
+        for (UUID uuid : waiting) {
+            Player player = Bukkit.getPlayer(uuid);
+            if (player == null) {
+                continue;
+            }
+            if (alone) {
+                say(player, "queue-alone", "mode", label);
+            } else {
+                say(player, "queue-waiting", "mode", label,
+                        "count", String.valueOf(waiting.size()), "min", String.valueOf(min));
+            }
+        }
     }
 
     private boolean leaveQueue(UUID uuid) {
@@ -721,14 +899,16 @@ public final class Game {
             if (arena.item <= 0) {
                 int interval = arena.time >= settings.maxGameSeconds() ? SUDDEN_DEATH_INTERVAL : settings.itemSeconds();
                 arena.item = interval;
-                for (UUID uuid : new ArrayList<>(arena.alive)) {
-                    Player player = Bukkit.getPlayer(uuid);
-                    if (player == null) {
-                        continue;
+                if (randomItems(arena)) {
+                    for (UUID uuid : new ArrayList<>(arena.alive)) {
+                        Player player = Bukkit.getPlayer(uuid);
+                        if (player == null) {
+                            continue;
+                        }
+                        plugin.items().giveRandom(player);
+                        Text.sound(player, settings.sound("item", "random.pop"), 1f, 1.3f);
+                        Text.actionBar(player, settings.text("action-item"));
                     }
-                    plugin.items().giveRandom(player);
-                    Text.sound(player, settings.sound("item", "random.pop"), 1f, 1.3f);
-                    Text.actionBar(player, settings.text("action-item"));
                 }
                 if (arena.time >= settings.maxGameSeconds() && arena.time % LIGHTNING_EVERY == 0) {
                     arenaMessage(arena, null, "sudden-death");
@@ -793,9 +973,13 @@ public final class Game {
                 clearInventory(player);
                 heal(player);
                 clearEffects(player);
+                if (mode != null && !mode.startItems().isEmpty()) {
+                    plugin.items().giveKit(player, mode.startItems());
+                }
                 Text.title(player, settings.text("title-cages"),
                         settings.text("subtitle-cages", "seconds", String.valueOf(countdown)), 3);
                 Text.sound(player, settings.sound("cages", "mob.wither.spawn"), 1f, 1.5f);
+                awardXp(player, settings.levels().xpPerGame(), "xp-game");
             }
         }
         plugin.boards().refreshVisibility();
@@ -819,7 +1003,7 @@ public final class Game {
             player.setGameMode(GameMode.SURVIVAL);
             Text.title(player, settings.text("title-fight"), settings.text("subtitle-fight"), 2);
             Text.sound(player, settings.sound("fight", "random.levelup"), 1f, 0.8f);
-            if (delay <= 0) {
+            if (delay <= 0 && randomItems(arena)) {
                 plugin.items().giveRandom(player);
             }
         }
@@ -865,6 +1049,8 @@ public final class Game {
             name = winnerPlayer.getName();
             Text.title(winnerPlayer, settings.text("title-victory"), settings.text("subtitle-victory"), 5);
             Text.sound(winnerPlayer, settings.sound("victory", "random.levelup"), 1f, 1f);
+            int streak = stats == null ? 1 : stats.streak;
+            awardWinXp(winnerPlayer, streak);
         }
         arenaMessage(arena, winnerPlayer, "won", "player", name);
         for (UUID uuid : arena.players) {

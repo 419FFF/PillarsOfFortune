@@ -101,7 +101,11 @@ public final class Fireballs {
                 continue;
             }
             explosionImmunity.put(player.getUniqueId(), System.currentTimeMillis() + 400L);
-            Vector knockback = knockback(player, blast, radius);
+            Vector knockback = knockback(player, blast);
+            // bedwars1058 sets the velocity right away. A follow-up tick re-asserts it because
+            // 1.8 applies the vanilla explosion push after this event.
+            player.setVelocity(knockback);
+            player.setFallDistance(0f);
             double damage = owner != null && owner.equals(player.getUniqueId())
                     ? plugin.settings().fireballDamageSelf()
                     : plugin.settings().fireballDamageEnemy();
@@ -118,7 +122,6 @@ public final class Fireballs {
                     customDamage.remove(player.getUniqueId());
                 }
             }
-            // 1.8 applies vanilla explosion velocity after this event. Set ours on the next tick.
             plugin.getServer().getScheduler().runTask(plugin, () -> {
                 if (player.isOnline() && plugin.game().isAlive(player)) {
                     player.setVelocity(knockback);
@@ -163,9 +166,11 @@ public final class Fireballs {
         Location spawnAt = player.getEyeLocation().add(direction.clone().multiply(1.2));
         Fireball fireball = player.getWorld().spawn(spawnAt, Fireball.class);
         fireball.setShooter(player);
-        // 1.8 uses direction for where the fireball travels. Velocity alone often aims upward.
-        fireball.setDirection(direction.clone());
-        fireball.setVelocity(direction.clone().multiply(plugin.settings().fireballSpeed()));
+        // bedwars1058 points the NMS direction at direction * 0.1 and then sets the velocity to
+        // that heading times the speed multiplier. Both are needed for a straight 1.8 shot.
+        Vector heading = direction.clone().multiply(0.1);
+        fireball.setDirection(heading);
+        fireball.setVelocity(heading.clone().multiply(plugin.settings().fireballSpeed()));
         fireball.setIsIncendiary(plugin.settings().fireballFire());
         fireball.setYield((float) plugin.settings().fireballYield());
         fireball.setMetadata(OWNER, new FixedMetadataValue(plugin, uuid.toString()));
@@ -174,30 +179,25 @@ public final class Fireballs {
         return true;
     }
 
-    private Vector knockback(Player player, Location blast, double radius) {
-        Location at = player.getLocation();
-        double dx = at.getX() - blast.getX();
-        double dy = at.getY() - blast.getY();
-        double dz = at.getZ() - blast.getZ();
-        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        double span = Math.max(0.01, radius);
-        double closeness = Math.max(0.4, Math.min(1.0, 1.0 - (distance / span)));
-        double horizontalLength = Math.sqrt(dx * dx + dz * dz);
-        double hx;
-        double hz;
-        if (horizontalLength < 0.15) {
-            hx = 0;
-            hz = 0;
+    private Vector knockback(Player player, Location blast) {
+        Vector away = blast.toVector().subtract(player.getLocation().toVector());
+        if (away.lengthSquared() < 1.0E-6) {
+            // Standing exactly on the blast: only the upward pop, no NaN direction.
+            return new Vector(0, plugin.settings().fireballKnockY() * 1.5, 0);
+        }
+        away.normalize();
+        // bedwars1058 points this vector at the blast and negates the config value.
+        Vector horizontal = away.clone().multiply(-plugin.settings().fireballKnockX());
+        double y = away.getY();
+        if (y < 0) {
+            y += 1.5;
+        }
+        if (y <= 0.5) {
+            y = plugin.settings().fireballKnockY() * 1.5; // knockback when not jumping
         } else {
-            hx = dx / horizontalLength;
-            hz = dz / horizontalLength;
+            y = y * plugin.settings().fireballKnockY() * 1.5; // knockback when jumping
         }
-        double horizontal = plugin.settings().fireballKnockX() * closeness;
-        double vertical = plugin.settings().fireballKnockY() * (0.6 + 0.4 * closeness);
-        if (dy < -0.4) {
-            vertical *= 0.35;
-        }
-        return new Vector(hx * horizontal, vertical, hz * horizontal);
+        return horizontal.setY(y);
     }
 
     private UUID ownerOf(Entity entity) {

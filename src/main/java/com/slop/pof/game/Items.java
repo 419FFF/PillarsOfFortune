@@ -9,6 +9,7 @@ import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import com.slop.pof.PoFPlugin;
 import com.slop.pof.config.Settings;
+import com.slop.pof.config.Visibility;
 import com.slop.pof.util.Amounts;
 import com.slop.pof.util.Rolls;
 import com.slop.pof.util.Text;
@@ -32,6 +33,8 @@ public final class Items {
         alias("WOOD_AXE", "WOODEN_AXE", "WOOD_AXE");
         alias("STONE_AXE", "STONE_AXE");
         alias("IRON_AXE", "IRON_AXE");
+        alias("WOOD_PICKAXE", "WOODEN_PICKAXE", "WOOD_PICKAXE");
+        alias("GOLDEN_APPLE", "GOLDEN_APPLE", "GOLD_APPLE");
         alias("BOW", "BOW");
         alias("ARROW", "ARROW");
         alias("FISHING_ROD", "FISHING_ROD");
@@ -122,8 +125,14 @@ public final class Items {
         PlayerInventory inv = player.getInventory();
         inv.setItem(0, joinItem());
         inv.setItem(4, null);
-        inv.setItem(8, null);
+        if (plugin.settings().hubEnabled()) {
+            inv.setItem(8, hubItem());
+        } else {
+            inv.setItem(8, null);
+            removeNamed(player, plugin.settings().hubName());
+        }
         removeNamed(player, plugin.settings().vipName());
+        inv.setItem(plugin.settings().visibilitySlot(), visibilityItem(plugin.boards().visibility(player)));
         player.updateInventory();
     }
 
@@ -131,6 +140,8 @@ public final class Items {
         PlayerInventory inv = player.getInventory();
         inv.setItem(0, null);
         removeNamed(player, plugin.settings().joinName());
+        // The toggle goes first so the leave item keeps its slot if an admin picks the same one.
+        inv.setItem(plugin.settings().visibilitySlot(), visibilityItem(plugin.boards().visibility(player)));
         inv.setItem(8, leaveItem());
         if (player.hasPermission(com.slop.pof.Perms.VIP)) {
             inv.setItem(4, vipItem());
@@ -139,6 +150,39 @@ public final class Items {
             removeNamed(player, plugin.settings().vipName());
         }
         player.updateInventory();
+    }
+
+    /** Bed item that runs the configured hub command. Only used while out of the queue. */
+    public ItemStack hubItem() {
+        return named(material(plugin.settings().hubMaterial(), Material.BED), plugin.settings().hubName());
+    }
+
+    public boolean isHub(ItemStack item) {
+        return plugin.settings().hubEnabled() && namedLike(item, plugin.settings().hubName());
+    }
+
+    /** The lobby toggle. Its dye color shows the current visibility state. */
+    public ItemStack visibilityItem(Visibility mode) {
+        Settings settings = plugin.settings();
+        Visibility state = mode == null ? settings.defaultVisibility() : mode;
+        Material material = material(settings.visibilityMaterial(), Material.INK_SACK);
+        ItemStack stack = named(material, settings.text("visibility-name-" + state.key()));
+        stack.setDurability(settings.visibilityData(state));
+        ItemMeta meta = stack.getItemMeta();
+        if (meta != null) {
+            meta.setLore(List.of(settings.text("visibility-lore")));
+            stack.setItemMeta(meta);
+        }
+        return stack;
+    }
+
+    public boolean isVisibility(ItemStack item) {
+        for (Visibility mode : Visibility.values()) {
+            if (namedLike(item, plugin.settings().text("visibility-name-" + mode.key()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean isJoin(ItemStack item) {
@@ -154,7 +198,7 @@ public final class Items {
     }
 
     public boolean isLobbyItem(ItemStack item) {
-        return isJoin(item) || isLeave(item) || isVip(item);
+        return isJoin(item) || isLeave(item) || isVip(item) || isVisibility(item) || isHub(item);
     }
 
     public boolean isIllegal(ItemStack item) {
@@ -252,13 +296,67 @@ public final class Items {
         player.getInventory().addItem(stack);
         if (spec.material == Material.FISHING_ROD) {
             for (ItemStack item : player.getInventory().getContents()) {
-                if (item != null && item.getType() == Material.FISHING_ROD) {
-                    item.setDurability((short) 64);
-                }
+                wearRod(item);
             }
         }
         plugin.database().addItem(player.getUniqueId());
         strip(player);
+    }
+
+    /**
+     * A fishing rod is handed out with a single use, like Classic, so it breaks on the first cast.
+     */
+    private static void wearRod(ItemStack rod) {
+        if (rod != null && rod.getType() == Material.FISHING_ROD) {
+            rod.setDurability((short) Math.max(1, rod.getType().getMaxDurability() - 1));
+        }
+    }
+
+    /**
+     * Gives an exact starting kit (used by modes such as Rush). Each line uses the same spec
+     * syntax as the item pools, so armor goes to armor slots and everything else to the inventory.
+     */
+    public void giveKit(Player player, List<String> kit) {
+        if (player == null || kit == null || kit.isEmpty()) {
+            return;
+        }
+        Settings settings = plugin.settings();
+        PlayerInventory inv = player.getInventory();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        for (Spec spec : parse(kit)) {
+            if (spec == null || isIllegal(new ItemStack(spec.material))) {
+                continue;
+            }
+            String key = spec.material.name();
+            List<EnchantPair> enchants = spec.enchants.isEmpty()
+                    ? parseEnchants(settings.enchantsFor(key))
+                    : spec.enchants;
+            int amount = amountFor(spec, 3, settings, random);
+            ItemStack stack = new ItemStack(spec.material, Math.max(1, Math.min(2304, amount)));
+            for (EnchantPair enchant : enchants) {
+                stack.addUnsafeEnchantment(enchant.enchant, Math.max(1, enchant.level));
+            }
+            if (spec.material == Material.FISHING_ROD) {
+                wearRod(stack);
+            }
+            equip(inv, stack);
+        }
+        player.updateInventory();
+    }
+
+    private static void equip(PlayerInventory inv, ItemStack stack) {
+        String name = stack.getType().name();
+        if (name.endsWith("_HELMET")) {
+            inv.setHelmet(stack);
+        } else if (name.endsWith("_CHESTPLATE")) {
+            inv.setChestplate(stack);
+        } else if (name.endsWith("_LEGGINGS")) {
+            inv.setLeggings(stack);
+        } else if (name.endsWith("_BOOTS")) {
+            inv.setBoots(stack);
+        } else {
+            inv.addItem(stack);
+        }
     }
 
     private static boolean containsIllegal(String name) {

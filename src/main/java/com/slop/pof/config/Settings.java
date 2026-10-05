@@ -46,7 +46,11 @@ public final class Settings {
     private final int queueSeconds;
     private final int itemSeconds;
     private final int itemDelaySeconds;
+    private final int queueReminderSeconds;
+    private final int queueAloneSeconds;
+    private final List<Integer> queueBroadcastSeconds;
     private final List<Gamemode> gamemodes;
+    private final Levels levels;
     private final int graceSeconds;
     private final int endSeconds;
     private final int maxGameSeconds;
@@ -74,6 +78,16 @@ public final class Settings {
     private final String leaveName;
     private final String vipMaterial;
     private final String vipName;
+    private final boolean hubEnabled;
+    private final String hubMaterial;
+    private final String hubName;
+    private final String hubCommand;
+    private final int visibilitySlot;
+    private final String visibilityMaterial;
+    private final int dyeAll;
+    private final int dyeQueue;
+    private final int dyeNone;
+    private final Visibility defaultVisibility;
     private final String storageType;
     private final String h2File;
     private final String mysqlHost;
@@ -86,7 +100,6 @@ public final class Settings {
     private final boolean playtimeOnlineOnly;
     private final Map<String, String> sounds;
     private final Map<String, String> messages;
-    private final Map<String, String> defaultMessages;
     private final List<String> weapons;
     private final List<String> armor;
     private final List<String> blocks;
@@ -132,7 +145,11 @@ public final class Settings {
         queueSeconds = Math.max(1, c.getInt("queue-seconds", 30));
         itemSeconds = Math.max(1, c.getInt("item-seconds", 5));
         itemDelaySeconds = Math.max(0, c.getInt("item-delay-seconds", 3));
+        queueReminderSeconds = Math.max(5, c.getInt("queue-reminder-seconds", 20));
+        queueAloneSeconds = Math.max(5, c.getInt("queue-alone-seconds", 60));
+        queueBroadcastSeconds = readIntList(c, "queue-broadcast-seconds", List.of(30, 20, 10, 5));
         gamemodes = readGamemodes(c);
+        levels = Levels.from(c);
         graceSeconds = Math.max(0, c.getInt("grace-seconds", 5));
         endSeconds = Math.max(1, c.getInt("end-seconds", 8));
         maxGameSeconds = Math.max(1, c.getInt("max-game-seconds", 600));
@@ -160,6 +177,16 @@ public final class Settings {
         leaveName = c.getString("lobby-items.leave-name", "&c&lLeave Queue");
         vipMaterial = c.getString("lobby-items.vip-material", "DIAMOND");
         vipName = c.getString("lobby-items.vip-name", "&6&lStart Match");
+        hubEnabled = c.getBoolean("lobby-items.hub-enabled", false);
+        hubMaterial = c.getString("lobby-items.hub-material", "BED");
+        hubName = c.getString("lobby-items.hub-name", "&a&lHub");
+        hubCommand = c.getString("lobby-items.hub-command", "hub");
+        visibilitySlot = Math.max(0, Math.min(8, c.getInt("visibility.slot", 7)));
+        visibilityMaterial = c.getString("visibility.item", "INK_SACK");
+        dyeAll = dye(c.getInt("visibility.dye-all", 10));
+        dyeQueue = dye(c.getInt("visibility.dye-queue", 11));
+        dyeNone = dye(c.getInt("visibility.dye-none", 8));
+        defaultVisibility = c.getBoolean("visibility.show-all-by-default", true) ? Visibility.ALL : Visibility.NONE;
         storageType = c.getString("storage.type", "h2");
         h2File = c.getString("storage.h2.file", "data");
         mysqlHost = c.getString("storage.mysql.host", "127.0.0.1");
@@ -172,7 +199,6 @@ public final class Settings {
         playtimeOnlineOnly = c.getBoolean("stats.playtime-online-only", true);
         sounds = readSection(c, "sounds");
         messages = readSection(c, "messages");
-        defaultMessages = readDefaultSection(c, "messages");
         weapons = list(c, "items.weapons");
         armor = list(c, "items.armor");
         blocks = list(c, "items.blocks");
@@ -270,20 +296,13 @@ public final class Settings {
     }
 
     /**
-     * Sidebar layout for one mode. Old per-line keys are used when {@code board-}* is missing
-     * or still the shipped default, so an older config keeps its wording and the numbers still change.
+     * Sidebar layout for one mode. The layout string always wins, and the built-in fallback is only
+     * used when nothing is configured. Old per-line keys are folded into {@code board-*} at load.
      */
     public String board(Player player, String mode, String... pairs) {
         String layout = messages.get("board-" + mode);
-        // The jar default is the baseline for "the admin never touched board-*". Comparing against
-        // BoardLayouts.builtin() never matched, so an old config kept the shipped layout and its
-        // per-line wording was ignored.
-        String shipped = defaultMessages.get("board-" + mode);
-        boolean untouched = layout == null || layout.isBlank() || layout.equals("board-" + mode)
-                || (shipped != null && BoardLayouts.same(layout, shipped));
-        String legacy = BoardLayouts.hasLegacy(messages::get) ? BoardLayouts.compose(mode, messages::get) : null;
-        if (untouched) {
-            layout = legacy != null ? legacy : BoardLayouts.builtin(mode);
+        if (layout == null || layout.isBlank() || layout.equals("board-" + mode)) {
+            layout = BoardLayouts.builtin(mode);
         }
         return Placeholders.apply(player, Text.color(applyText(layout, pairs)));
     }
@@ -331,19 +350,20 @@ public final class Settings {
         return text;
     }
 
-    /** The values shipped inside the jar, used to tell a default from an admin's edit. */
-    private static Map<String, String> readDefaultSection(FileConfiguration c, String path) {
-        Map<String, String> map = new HashMap<>();
-        if (c.getDefaults() == null) {
-            return map;
-        }
-        ConfigurationSection defaults = c.getDefaults().getConfigurationSection(path);
-        if (defaults != null) {
-            for (String key : defaults.getKeys(false)) {
-                map.put(key, defaults.getString(key, ""));
+    /** Positive integers from a config list, or the fallback when the list is empty. */
+    private static List<Integer> readIntList(FileConfiguration c, String path, List<Integer> fallback) {
+        List<Integer> values = new ArrayList<>();
+        for (int value : c.getIntegerList(path)) {
+            if (value > 0) {
+                values.add(value);
             }
         }
-        return map;
+        return values.isEmpty() ? fallback : values;
+    }
+
+    /** Dye data values are 0 to 15 in 1.8. */
+    private static int dye(int value) {
+        return Math.max(0, Math.min(15, value));
     }
 
     private static Map<String, String> readSection(FileConfiguration c, String path) {
@@ -467,9 +487,22 @@ public final class Settings {
     public int queueSeconds() { return queueSeconds; }
     public int itemSeconds() { return itemSeconds; }
     public int itemDelaySeconds() { return itemDelaySeconds; }
+    /** How often the "waiting for players" reminder repeats, in seconds. */
+    public int queueReminderSeconds() { return queueReminderSeconds; }
+    /** How often the "you are alone" reminder repeats, in seconds. Kept rarer than the above. */
+    public int queueAloneSeconds() { return queueAloneSeconds; }
+    /** Seconds-left values that trigger the "starting soon" broadcast. */
+    public List<Integer> queueBroadcastSeconds() { return queueBroadcastSeconds; }
+    /** True when a "starting soon" line should be sent with this many seconds left. */
+    public boolean broadcastAt(int seconds) { return queueBroadcastSeconds.contains(seconds); }
 
     public List<Gamemode> gamemodes() {
         return gamemodes;
+    }
+
+    /** The leveling curve and XP rewards. */
+    public Levels levels() {
+        return levels;
     }
 
     public List<Gamemode> enabledGamemodes() {
@@ -546,6 +579,24 @@ public final class Settings {
     public String leaveName() { return leaveName; }
     public String vipMaterial() { return vipMaterial; }
     public String vipName() { return vipName; }
+    /** Bed item that runs a hub command, shown in the lobby only while out of the queue. */
+    public boolean hubEnabled() { return hubEnabled; }
+    public String hubMaterial() { return hubMaterial; }
+    public String hubName() { return hubName; }
+    /** Command run as the player, without a leading slash. */
+    public String hubCommand() { return hubCommand; }
+    /** Hotbar slot of the lobby visibility toggle. 8 is the 9th slot, which is the leave item. */
+    public int visibilitySlot() { return visibilitySlot; }
+    public String visibilityMaterial() { return visibilityMaterial; }
+    /** Dye data value for a state. */
+    public short visibilityData(Visibility mode) {
+        return (short) switch (mode == null ? Visibility.ALL : mode) {
+            case ALL -> dyeAll;
+            case QUEUE -> dyeQueue;
+            case NONE -> dyeNone;
+        };
+    }
+    public Visibility defaultVisibility() { return defaultVisibility; }
     public String storageType() { return storageType; }
     public String h2File() { return h2File; }
     public String mysqlHost() { return mysqlHost; }

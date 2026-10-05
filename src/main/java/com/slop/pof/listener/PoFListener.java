@@ -223,6 +223,16 @@ public final class PoFListener implements Listener {
         } else if (plugin.items().isLeave(item)) {
             event.setCancelled(true);
             plugin.game().leaveQueueItem(player);
+        } else if (plugin.items().isVisibility(item)) {
+            event.setCancelled(true);
+            plugin.boards().cycleVisibility(player);
+        } else if (plugin.items().isHub(item)) {
+            event.setCancelled(true);
+            String command = plugin.settings().hubCommand();
+            if (command != null && !command.isBlank()) {
+                // Run the hub command as the player, so their own permissions apply.
+                player.performCommand(command.startsWith("/") ? command.substring(1) : command);
+            }
         }
     }
 

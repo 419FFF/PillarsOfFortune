@@ -21,7 +21,7 @@ class BoardConfigTest {
     }
 
     @Test
-    void legacyPerLineKeysAreUsedWhenTheBoardStringIsUntouched() {
+    void shippedLayoutWinsWhenOnlyLegacyKeysExist() {
         YamlConfiguration user = new YamlConfiguration();
         user.setDefaults(jarDefaults());
         // An old config has no board-lobby, only the per-line keys it was written with.
@@ -31,8 +31,11 @@ class BoardConfigTest {
         Settings settings = Settings.from(user);
         String rendered = settings.board(null, "lobby");
 
-        assertTrue(rendered.contains("MY TITLE"), rendered);
-        assertTrue(rendered.contains("my.server.net"), rendered);
+        // The layout string wins over the old per-line keys: the composed legacy form has no
+        // {title}, {level_name} or bar, so it must not be used.
+        assertTrue(rendered.contains("/pof join"), rendered);
+        assertTrue(rendered.contains("Wins"), rendered);
+        assertFalse(rendered.contains("MY TITLE"), rendered);
     }
 
     @Test

@@ -23,7 +23,7 @@ import java.util.logging.Level;
  * The previous file is saved as {@code config.yml.vN.bak} before the converted file is written.
  */
 public final class ConfigUpdater {
-    public static final int CURRENT = 10;
+    public static final int CURRENT = 20;
 
     private ConfigUpdater() {
     }
@@ -112,6 +112,16 @@ public final class ConfigUpdater {
                 // Gamemode blocks saved as "classic: {}" are filled from the jar after this step.
             }
             case 9 -> to10(config, defaults);
+            case 10 -> to11(config, defaults);
+            case 11 -> to12(config, defaults);
+            case 12 -> to13(config, defaults);
+            case 13 -> to14(config, defaults);
+            case 14 -> to15(config, defaults);
+            case 15 -> to16(config, defaults);
+            case 16 -> to17(config, defaults);
+            case 17 -> to18(config, defaults);
+            case 18 -> to19(config, defaults);
+            case 19 -> to20(config, defaults);
             default -> {
                 // A gap still moves forward. Missing keys are filled after the last step.
             }
@@ -205,8 +215,9 @@ public final class ConfigUpdater {
     }
 
     /**
-     * Writes the six sidebar layouts from the old per-line keys when those keys are still present.
-     * A layout the user already edited is left as they saved it. The per-line keys are then removed.
+     * Folds the old per-line keys into {@code board-*} when a layout is missing, then removes the
+     * per-line keys. A layout that is present, including the shipped default, is never overwritten:
+     * the composed form would drop the newer {title}, {date}, {level_name} and {progress} tokens.
      */
     private static void to10(FileConfiguration config, YamlConfiguration defaults) {
         java.util.function.Function<String, String> read = reader(config);
@@ -216,13 +227,296 @@ public final class ConfigUpdater {
         for (String mode : BoardLayouts.MODES) {
             String path = "messages.board-" + mode;
             String current = own(config, path) ? config.getString(path) : null;
-            String shipped = defaults.getString(path);
-            if (current == null || current.isBlank() || BoardLayouts.same(current, shipped) || BoardLayouts.same(current, BoardLayouts.builtin(mode))) {
+            if (current == null || current.isBlank()) {
                 config.set(path, BoardLayouts.compose(mode, read));
             }
         }
         for (String old : BoardLayouts.LEGACY) {
             config.set("messages." + old, null);
+        }
+    }
+
+    /**
+     * Classic's icon moved to bedrock (Rush uses a diamond sword) and the fireball was retuned to
+     * match the bedwars1058 fork. Only values still on the old default are changed.
+     */
+    private static void to11(FileConfiguration config, YamlConfiguration defaults) {
+        if ("NETHER_STAR".equalsIgnoreCase(config.getString("gamemodes.classic.icon", ""))) {
+            config.set("gamemodes.classic.icon", "BEDROCK");
+        }
+        fireballDefault(config, defaults, "fireball.speed", 1.6D);
+        fireballDefault(config, defaults, "fireball.knockback-horizontal", 2.6D);
+        fireballDefault(config, defaults, "fireball.knockback-vertical", 1.1D);
+        fireballDefault(config, defaults, "fireball.radius", 3.5D);
+        fireballDefault(config, defaults, "fireball.yield", 2.0D);
+    }
+
+    /** Mode descriptions shown in the mode menu, plus the line used when a mode has no item drops. */
+    private static void to12(FileConfiguration config, YamlConfiguration defaults) {
+        ensure(config, defaults, "messages.gamemode-lore-kit");
+        for (String id : new String[]{"classic", "rush", "custom"}) {
+            ensure(config, defaults, "gamemodes." + id + ".description");
+        }
+    }
+
+    /**
+     * Leveling, the lobby visibility toggle, and the level lines in the sidebar. A layout the admin
+     * edited keeps its text; the level lines are appended only when they are not there yet.
+     */
+    private static void to13(FileConfiguration config, YamlConfiguration defaults) {
+        for (String mode : BoardLayouts.MODES) {
+            String path = "messages.board-" + mode;
+            if (!own(config, path)) {
+                continue;
+            }
+            String layout = config.getString(path);
+            if (layout == null || layout.contains("{level_name}")) {
+                continue;
+            }
+            // Literal backslash-n, the same shape the shipped layouts use; the sidebar reads both.
+            config.set(path, layout + "\\n&fLevel: {level_name}\\n{progress}");
+        }
+        ensure(config, defaults, "visibility");
+        ensure(config, defaults, "leveling");
+        ensure(config, defaults, "messages.top-unknown");
+    }
+
+    /**
+     * The sidebar title became {@code {title}} so a match can show its mode name (RUSH, CLASSIC),
+     * and a light-gray {@code &7{date}} line was added right under it. Only a leading literal title
+     * is swapped, and the date line is inserted once.
+     */
+    private static void to14(FileConfiguration config, YamlConfiguration defaults) {
+        String[] oldTitles = {"&6&lPILLARS", "&6&lSTARTING", "&6&lFORTUNE", "&6&lFINISHED"};
+        for (String mode : BoardLayouts.MODES) {
+            String path = "messages.board-" + mode;
+            if (!own(config, path)) {
+                continue;
+            }
+            String layout = config.getString(path);
+            if (layout == null || layout.isBlank()) {
+                continue;
+            }
+            java.util.List<String> lines = new java.util.ArrayList<>(
+                    java.util.Arrays.asList(layout.replace("\\n", "\n").split("\n", -1)));
+            boolean changed = false;
+            if (!lines.isEmpty()) {
+                for (String old : oldTitles) {
+                    if (lines.get(0).trim().equals(old)) {
+                        lines.set(0, "{title}");
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            if (!layout.contains("{date}")) {
+                lines.add(1, "&7{date}");
+                changed = true;
+            }
+            if (changed) {
+                config.set(path, String.join("\\n", lines));
+            }
+        }
+        ensure(config, defaults, "queue-alone-seconds");
+    }
+
+    /**
+     * The XP bar belongs right above the server IP, and the bed hub item was added (off by default).
+     * The bar line is removed wherever it was and re-inserted above the last line.
+     */
+    private static void to15(FileConfiguration config, YamlConfiguration defaults) {
+        for (String mode : BoardLayouts.MODES) {
+            String path = "messages.board-" + mode;
+            if (!own(config, path)) {
+                continue;
+            }
+            String layout = config.getString(path);
+            if (layout == null || !layout.contains("{progress}")) {
+                continue;
+            }
+            java.util.List<String> lines = new java.util.ArrayList<>(
+                    java.util.Arrays.asList(layout.replace("\\n", "\n").split("\n", -1)));
+            lines.removeIf(line -> line.contains("{progress}"));
+            lines.add(Math.max(0, lines.size() - 1), "{progress}");
+            config.set(path, String.join("\\n", lines));
+        }
+        ensure(config, defaults, "lobby-items.hub-enabled");
+        ensure(config, defaults, "lobby-items.hub-material");
+        ensure(config, defaults, "lobby-items.hub-name");
+        ensure(config, defaults, "lobby-items.hub-command");
+    }
+
+    /**
+     * Repairs the sidebar to the modern shape. Older configs, and ones healed from the per-line keys,
+     * can have a literal title, no date, and no level or bar. The title becomes {@code {title}} so a
+     * match shows its mode (RUSH, CLASSIC), the date line is added, arena boards drop the level line,
+     * and the bar is placed above the last line (the server IP).
+     */
+    private static void to16(FileConfiguration config, YamlConfiguration defaults) {
+        String[] oldTitles = {"&6&lPILLARS", "&6&lSTARTING", "&6&lFORTUNE", "&6&lFINISHED"};
+        for (String mode : BoardLayouts.MODES) {
+            String path = "messages.board-" + mode;
+            if (!own(config, path)) {
+                continue;
+            }
+            String layout = config.getString(path);
+            if (layout == null || layout.isBlank()) {
+                continue;
+            }
+            java.util.List<String> lines = new java.util.ArrayList<>(
+                    java.util.Arrays.asList(layout.replace("\\n", "\n").split("\n", -1)));
+            boolean changed = false;
+            if (!lines.isEmpty()) {
+                for (String old : oldTitles) {
+                    if (lines.get(0).trim().equals(old)) {
+                        lines.set(0, "{title}");
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            if (!String.join("\n", lines).contains("{date}")) {
+                lines.add(Math.min(1, lines.size()), "&7{date}");
+                changed = true;
+            }
+            boolean lobbyish = "lobby".equals(mode) || "queued".equals(mode);
+            if (lobbyish && !String.join("\n", lines).contains("{level_name}")) {
+                lines.add(Math.min(2, lines.size()), "&fLevel: {level_name}");
+                changed = true;
+            }
+            if (!lobbyish) {
+                changed |= lines.removeIf(line -> line.contains("{level_name}"));
+            }
+            if (!String.join("\n", lines).contains("{progress}")) {
+                lines.add(Math.max(0, lines.size() - 1), "{progress}");
+                changed = true;
+            }
+            if (changed) {
+                config.set(path, String.join("\\n", lines));
+            }
+        }
+    }
+
+    /**
+     * The level shows on every board again, the winstreak bonus is softer, and the fixed rankup table
+     * gives way to the progressive curve in {@code leveling.rankup-base/growth/cap}. Values an admin
+     * changed by hand are left alone.
+     */
+    private static void to17(FileConfiguration config, YamlConfiguration defaults) {
+        for (String mode : BoardLayouts.MODES) {
+            String path = "messages.board-" + mode;
+            if (!own(config, path)) {
+                continue;
+            }
+            String layout = config.getString(path);
+            if (layout == null || layout.isBlank() || layout.contains("{level_name}")) {
+                continue;
+            }
+            java.util.List<String> lines = new java.util.ArrayList<>(
+                    java.util.Arrays.asList(layout.replace("\\n", "\n").split("\n", -1)));
+            int at = lines.size() < 2 ? lines.size() : (lines.get(1).contains("{date}") ? 2 : 1);
+            lines.add(Math.min(at, lines.size()), "&fLevel: {level_name}");
+            config.set(path, String.join("\\n", lines));
+        }
+        if (config.getInt("leveling.winstreak-step", 25) == 25) {
+            config.set("leveling.winstreak-step", 10);
+        }
+        if (config.getInt("leveling.winstreak-cap", 250) == 250) {
+            config.set("leveling.winstreak-cap", 100);
+        }
+        ConfigurationSection rankups = config.getConfigurationSection("leveling.rankups");
+        if (rankups != null && isOldRankupTable(rankups)) {
+            config.set("leveling.rankups", null);
+        }
+    }
+
+    /** True when {@code leveling.rankups} still holds the exact values the jar used to ship. */
+    private static boolean isOldRankupTable(ConfigurationSection rankups) {
+        java.util.Map<String, Integer> expected = java.util.Map.of(
+                "1", 500, "2", 1000, "3", 1500, "4-19", 2000, "others", 3000);
+        if (!rankups.getKeys(false).equals(expected.keySet())) {
+            return false;
+        }
+        for (java.util.Map.Entry<String, Integer> entry : expected.entrySet()) {
+            if (rankups.getInt(entry.getKey()) != entry.getValue()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** The lobby sidebar no longer ships a "/pof join" hint line. */
+    private static void to18(FileConfiguration config, YamlConfiguration defaults) {
+        for (String mode : BoardLayouts.MODES) {
+            String path = "messages.board-" + mode;
+            if (!own(config, path)) {
+                continue;
+            }
+            String layout = config.getString(path);
+            if (layout == null || !layout.contains("&6/pof join")) {
+                continue;
+            }
+            java.util.List<String> lines = new java.util.ArrayList<>(
+                    java.util.Arrays.asList(layout.replace("\\n", "\n").split("\n", -1)));
+            if (lines.removeIf(line -> line.trim().equals("&6/pof join"))) {
+                config.set(path, String.join("\\n", lines));
+            }
+        }
+    }
+
+    /** The level now sits right next to its progress bar on a single line. */
+    private static void to19(FileConfiguration config, YamlConfiguration defaults) {
+        for (String mode : BoardLayouts.MODES) {
+            String path = "messages.board-" + mode;
+            if (!own(config, path)) {
+                continue;
+            }
+            String layout = config.getString(path);
+            if (layout == null || !layout.contains("{progress}")) {
+                continue;
+            }
+            java.util.List<String> lines = new java.util.ArrayList<>(
+                    java.util.Arrays.asList(layout.replace("\\n", "\n").split("\n", -1)));
+            boolean changed = lines.removeIf(line -> line.contains("{level_name}") && !line.contains("{progress}"));
+            String joined = "&fLevel: {level_name} {progress}";
+            for (int i = 0; i < lines.size(); i++) {
+                if (lines.get(i).contains("{progress}")) {
+                    if (!lines.get(i).equals(joined)) {
+                        lines.set(i, joined);
+                        changed = true;
+                    }
+                    break;
+                }
+            }
+            if (changed) {
+                config.set(path, String.join("\\n", lines));
+            }
+        }
+    }
+
+    /** The blank &8 spacer line was dropped from every board so the sidebar has no gaps. */
+    private static void to20(FileConfiguration config, YamlConfiguration defaults) {
+        for (String mode : BoardLayouts.MODES) {
+            String path = "messages.board-" + mode;
+            if (!own(config, path)) {
+                continue;
+            }
+            String layout = config.getString(path);
+            if (layout == null || !layout.contains("&8")) {
+                continue;
+            }
+            java.util.List<String> lines = new java.util.ArrayList<>(
+                    java.util.Arrays.asList(layout.replace("\\n", "\n").split("\n", -1)));
+            if (lines.removeIf(line -> line.trim().equals("&8"))) {
+                config.set(path, String.join("\\n", lines));
+            }
+        }
+    }
+
+    private static void fireballDefault(FileConfiguration config, YamlConfiguration defaults,
+                                        String path, double oldDefault) {
+        if (Double.compare(config.getDouble(path, oldDefault), oldDefault) == 0) {
+            config.set(path, defaults.getDouble(path, oldDefault));
         }
     }
 

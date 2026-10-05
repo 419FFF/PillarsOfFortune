@@ -9,7 +9,9 @@ import org.bukkit.entity.Player;
 import com.slop.pof.Perms;
 import com.slop.pof.PoFPlugin;
 import com.slop.pof.arena.Arena;
+import com.slop.pof.config.Levels;
 import com.slop.pof.config.Settings;
+import com.slop.pof.storage.Leaderboard;
 import com.slop.pof.storage.Stats;
 import com.slop.pof.storage.TopEntry;
 
@@ -17,12 +19,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 public final class PofCommand implements CommandExecutor, TabCompleter {
     private static final List<String> ALL = List.of(
-            "join", "leave", "stats", "top", "start", "stop", "setlobby", "regen", "arenas", "debug", "reload"
+            "join", "leave", "stats", "top", "level", "start", "stop", "setlobby", "regen", "arenas", "debug",
+            "reload", "xp"
     );
-    private static final List<String> PLAY = List.of("join", "leave", "stats", "top");
+    private static final List<String> PLAY = List.of("join", "leave", "stats", "top", "level");
 
     private final PoFPlugin plugin;
 
@@ -42,7 +46,8 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
             case "join" -> join(sender);
             case "leave" -> leave(sender);
             case "stats" -> stats(sender, args);
-            case "top" -> top(sender);
+            case "top" -> top(sender, args);
+            case "level" -> level(sender, args);
             case "start" -> start(sender);
             case "stop" -> stop(sender, args);
             case "setlobby" -> setLobby(sender);
@@ -50,6 +55,7 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
             case "arenas" -> arenas(sender);
             case "debug" -> debug(sender, args);
             case "reload" -> reload(sender);
+            case "xp" -> xp(sender, args);
             default -> tell(sender, "unknown");
         }
         return true;
@@ -137,9 +143,14 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
                 "mins", String.valueOf(stats.playtimeMin));
     }
 
-    private void top(CommandSender sender) {
+    private void top(CommandSender sender, String[] args) {
         if (sender instanceof Player player && !player.hasPermission(Perms.PLAY)) {
             tell(player, "no-permission");
+            return;
+        }
+        Leaderboard board = args.length >= 2 ? Leaderboard.of(args[1]) : Leaderboard.WINS;
+        if (board == null) {
+            tell(sender, "top-unknown");
             return;
         }
         plugin.game().refreshTop();
@@ -147,21 +158,24 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
             tell(sender, "top-error");
             return;
         }
-        List<TopEntry> rows = plugin.game().top();
-        tell(sender, "top-header");
+        List<TopEntry> rows = plugin.game().top(board);
+        tell(sender, "top-header", "board", board.label);
         if (rows.isEmpty()) {
-            tell(sender, "top-empty");
+            tell(sender, "top-empty", "board", board.label);
         } else {
             int rank = 1;
             for (TopEntry row : rows) {
                 tell(sender, Bukkit.getPlayerExact(row.name), "top-line",
                         "rank", String.valueOf(rank++),
                         "player", row.name,
-                        "wins", String.valueOf(row.wins));
+                        "value", String.valueOf(row.value),
+                        // Kept so configs that still write {wins} keep working on every board.
+                        "wins", String.valueOf(row.value),
+                        "board", board.label);
             }
         }
         if (plugin.isDebug()) {
-            tell(sender, "debug-line", "message", "rows=" + rows.size());
+            tell(sender, "debug-line", "message", "rows=" + rows.size() + " board=" + board.label);
         }
     }
 
@@ -322,6 +336,110 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
                 + " min-players=" + settings.minPlayers() + " max-players=" + settings.maxPlayers();
     }
 
+    /**
+     * {@code /pof xp give|set|setlevel <player> <amount>}. Admin only. Offline players work too.
+     */
+    private void xp(CommandSender sender, String[] args) {
+        if (!sender.hasPermission(Perms.ADMIN)) {
+            tell(sender, "no-permission");
+            return;
+        }
+        if (args.length < 4) {
+            tell(sender, "xp-usage");
+            return;
+        }
+        String action = args[1].toLowerCase(Locale.ROOT);
+        int amount;
+        try {
+            amount = Integer.parseInt(args[3].trim());
+        } catch (NumberFormatException ex) {
+            tell(sender, "xp-usage");
+            return;
+        }
+        UUID target = resolveTarget(args[2]);
+        if (target == null) {
+            tell(sender, "player-not-found");
+            return;
+        }
+        Player online = Bukkit.getPlayer(target);
+        switch (action) {
+            case "give", "add" -> plugin.game().giveXp(online, target, Math.max(0, amount));
+            case "set" -> plugin.game().setXp(online, target, Math.max(0, amount));
+            case "setlevel", "level" -> plugin.game().setLevel(online, target, Math.max(1, amount));
+            default -> {
+                tell(sender, "xp-usage");
+                return;
+            }
+        }
+        Stats stats = plugin.database().get(target);
+        tell(sender, "xp-done", "player", args[2],
+                "level", String.valueOf(stats == null ? 1 : Math.max(1, stats.level)),
+                "xp", String.valueOf(stats == null ? 0 : Math.max(0, stats.xp)));
+    }
+
+    /** Online name first, then a stored name, so offline players can be edited too. */
+    private UUID resolveTarget(String name) {
+        Player online = Bukkit.getPlayerExact(name);
+        if (online != null) {
+            return online.getUniqueId();
+        }
+        Stats stats = plugin.database().findByName(name);
+        return stats == null ? null : stats.uuid;
+    }
+
+    /**
+     * {@code /pof level [player]}. Shows the level, the XP inside it, and a progress bar. Other
+     * players need {@code slop.pof.stats.others} and may be offline.
+     */
+    private void level(CommandSender sender, String[] args) {
+        if (args.length >= 2) {
+            if (sender instanceof Player player && !player.hasPermission(Perms.STATS_OTHERS)) {
+                tell(player, "no-permission");
+                return;
+            }
+            Player online = Bukkit.getPlayerExact(args[1]);
+            if (online != null) {
+                plugin.database().ensure(online.getUniqueId(), online.getName());
+                Stats stats = plugin.database().get(online.getUniqueId());
+                showLevel(sender, online.getName(), stats == null ? 1 : stats.level, stats == null ? 0 : stats.xp);
+                return;
+            }
+            Stats stored = plugin.database().findByName(args[1]);
+            if (stored == null) {
+                tell(sender, "player-not-found");
+                return;
+            }
+            showLevel(sender, stored.name, stored.level, stored.xp);
+            return;
+        }
+        if (!(sender instanceof Player player)) {
+            tell(sender, "players-only");
+            return;
+        }
+        if (!player.hasPermission(Perms.PLAY)) {
+            tell(player, "no-permission");
+            return;
+        }
+        plugin.database().ensure(player.getUniqueId(), player.getName());
+        Stats stats = plugin.database().get(player.getUniqueId());
+        showLevel(sender, player.getName(), stats == null ? 1 : stats.level, stats == null ? 0 : stats.xp);
+    }
+
+    private void showLevel(CommandSender sender, String name, int level, int xp) {
+        Levels levels = plugin.settings().levels();
+        int safeLevel = Math.max(1, level);
+        int safeXp = Math.max(0, xp);
+        int next = levels.nextCost(safeLevel);
+        int percent = (int) Math.round(levels.progress(safeLevel, safeXp) * 100.0D);
+        tell(sender, "level-header", "player", name);
+        tell(sender, "level-bar", "progress", levels.bar(safeLevel, safeXp));
+        tell(sender, "level-line",
+                "level", String.valueOf(safeLevel),
+                "xp", String.valueOf(safeXp),
+                "xp_next", String.valueOf(next),
+                "percent", String.valueOf(percent));
+    }
+
     private void reload(CommandSender sender) {
         if (!sender.hasPermission(Perms.ADMIN)) {
             tell(sender, "no-permission");
@@ -350,6 +468,26 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
                 names.add(player.getName());
             }
             return filter(names, args[1]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("level")) {
+            List<String> names = new ArrayList<>();
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                names.add(player.getName());
+            }
+            return filter(names, args[1]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("top")) {
+            return filter(List.of("wins", "kills", "streak", "level"), args[1]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("xp") && sender.hasPermission(Perms.ADMIN)) {
+            return filter(List.of("give", "set", "setlevel"), args[1]);
+        }
+        if (args.length == 3 && args[0].equalsIgnoreCase("xp") && sender.hasPermission(Perms.ADMIN)) {
+            List<String> names = new ArrayList<>();
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                names.add(player.getName());
+            }
+            return filter(names, args[2]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("stop") && sender.hasPermission(Perms.ADMIN)) {
             List<String> ids = new ArrayList<>();

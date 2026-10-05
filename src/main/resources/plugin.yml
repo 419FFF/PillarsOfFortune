@@ -11,7 +11,7 @@ softdepend: [ProtocolLib, PlaceholderAPI, LuckPerms]
 commands:
   pof:
     description: Pillars of Fortune
-    usage: /pof [join|leave|stats|top|start|stop|setlobby|regen|arenas|debug|reload]
+    usage: /pof [join|leave|stats|level|top|start|stop|setlobby|regen|arenas|debug|reload|xp]
     # Extra names for the same command.
     aliases: [pillars, fortune]
 permissions:

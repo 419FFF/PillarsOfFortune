@@ -10,9 +10,12 @@ import org.bukkit.scoreboard.Team;
 import com.slop.pof.PoFPlugin;
 import com.slop.pof.arena.Arena;
 import com.slop.pof.config.Gamemode;
+import com.slop.pof.config.Levels;
 import com.slop.pof.config.Settings;
+import com.slop.pof.config.Visibility;
 import com.slop.pof.game.Game;
 import com.slop.pof.storage.Stats;
+import com.slop.pof.util.Text;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -21,7 +24,14 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class Boards {
+    private static final String OBJECTIVE = "pof";
+    private static final String TEAM_PREFIX = "l";
     private static final String[] ENTRIES = new String[16];
+    /** Sidebar rows 1..15. ENTRIES[0] is unused. */
+    private static final int MAX_ROWS = ENTRIES.length - 1;
+    /** Current date under the title, in the requested MM/DD/YY shape. */
+    private static final java.time.format.DateTimeFormatter DATE =
+            java.time.format.DateTimeFormatter.ofPattern("MM/dd/yy");
 
     static {
         ChatColor[] colors = {
@@ -38,6 +48,7 @@ public final class Boards {
     private final PoFPlugin plugin;
     private final Map<UUID, View> views = new HashMap<>();
     private final Set<String> uiErrors = new HashSet<>();
+    private final Map<UUID, Visibility> visibilityModes = new HashMap<>();
 
     public Boards(PoFPlugin plugin) {
         this.plugin = plugin;
@@ -76,6 +87,29 @@ public final class Boards {
         }
     }
 
+    /** The viewer's lobby visibility. New players start on the config default. */
+    public Visibility visibility(Player player) {
+        return player == null ? plugin.settings().defaultVisibility() : visibility(player.getUniqueId());
+    }
+
+    public Visibility visibility(UUID uuid) {
+        return visibilityModes.getOrDefault(uuid, plugin.settings().defaultVisibility());
+    }
+
+    /** Show all, then hide non-queue, then hide all. Refreshes the hotbar and everyone's view. */
+    public void cycleVisibility(Player player) {
+        Visibility next = visibility(player).next();
+        visibilityModes.put(player.getUniqueId(), next);
+        if (plugin.game().queued(player.getUniqueId())) {
+            plugin.items().giveQueued(player);
+        } else {
+            plugin.items().giveLobby(player);
+        }
+        refreshVisibility();
+        player.sendMessage(plugin.settings().chat(player, "visibility-changed",
+                "mode", plugin.settings().text(player, "visibility-name-" + next.key())));
+    }
+
     public void clearAll() {
         for (Player viewer : Bukkit.getOnlinePlayers()) {
             for (Player other : Bukkit.getOnlinePlayers()) {
@@ -86,6 +120,7 @@ public final class Boards {
             clear(viewer);
         }
         views.clear();
+        visibilityModes.clear();
     }
 
     private void sidebar(Player player) {
@@ -109,8 +144,23 @@ public final class Boards {
                 ? settings.text(player, "board-start-waiting")
                 : settings.text(player, "board-start", "value", String.valueOf(game.queueTimer(player.getUniqueId())));
         int alive = arena == null ? 0 : arena.aliveCount();
+        Levels levels = settings.levels();
+        int level = stats == null ? 1 : Math.max(1, stats.level);
+        int xp = stats == null ? 0 : Math.max(0, stats.xp);
+        int xpNext = levels.nextCost(level);
+        if (levels.enabled()) {
+            player.setLevel(level);
+            player.setExp((float) levels.progress(level, xp));
+        }
         String rendered = settings.board(player, mode,
                 "ip", settings.serverIp(),
+                "title", title(mode, arena),
+                "date", DATE.format(java.time.LocalDate.now()),
+                "level", String.valueOf(level),
+                "level_name", levels.name(level),
+                "xp", String.valueOf(xp),
+                "xp_next", String.valueOf(xpNext),
+                "progress", levels.bar(level, xp),
                 "wins", String.valueOf(stats == null ? 0 : stats.wins),
                 "kills", String.valueOf(stats == null ? 0 : stats.kills),
                 "deaths", String.valueOf(stats == null ? 0 : stats.deaths),
@@ -136,19 +186,44 @@ public final class Boards {
         String[] rows = sidebarLines(rendered);
         int body = rows.length - 1;
         View view = views.computeIfAbsent(player.getUniqueId(), id -> new View());
-        if (view.board == null || view.rows != body) {
+        if (view.board == null) {
             view.board = Bukkit.getScoreboardManager().getNewScoreboard();
-            view.objective = view.board.registerNewObjective("pof", "dummy");
+            Objective existing = view.board.getObjective(OBJECTIVE);
+            view.objective = existing != null ? existing : view.board.registerNewObjective(OBJECTIVE, "dummy");
             view.objective.setDisplaySlot(DisplaySlot.SIDEBAR);
-            view.rows = body;
+        }
+        // Another plugin or /scoreboard can swap the board out; make sure ours is the one shown.
+        if (player.getScoreboard() != view.board) {
             player.setScoreboard(view.board);
+        }
+        // A changed layout wipes every row first, so nothing from the previous screen can linger
+        // (for example lobby lines during the first seconds of a match).
+        if (!rendered.equals(view.rendered)) {
+            for (int score = 1; score <= MAX_ROWS; score++) {
+                clearRow(view, score);
+            }
+            view.rendered = rendered;
         }
         if (!rows[0].equals(view.objective.getDisplayName())) {
             view.objective.setDisplayName(rows[0]);
         }
-        for (int i = 0; i < body; i++) {
-            line(view, body - i, rows[i + 1]);
+        // Row N is score N, so a shorter layout must clear the rows it no longer uses.
+        for (int score = 1; score <= MAX_ROWS; score++) {
+            if (score > body) {
+                clearRow(view, score);
+            } else {
+                line(view, score, rows[body - score + 1]);
+            }
         }
+    }
+
+    /** Removes a sidebar row completely, team and score, so nothing is left behind. */
+    private static void clearRow(View view, int score) {
+        Team team = view.board.getTeam(TEAM_PREFIX + score);
+        if (team != null) {
+            team.unregister();
+        }
+        view.board.resetScores(ENTRIES[score]);
     }
 
     /** Title, then up to 15 body lines. A config {@code \n} or a real line break separates lines. */
@@ -192,11 +267,28 @@ public final class Boards {
      * so players who are in a round are not mixed in.
      */
     private void applyVisibility(Player viewer, Arena viewerArena) {
+        Visibility mode = visibility(viewer);
+        String viewerQueue = plugin.game().queuedMode(viewer.getUniqueId());
         for (Player other : Bukkit.getOnlinePlayers()) {
             if (other.equals(viewer)) {
                 continue;
             }
-            if (sameTab(viewerArena, arenaOf(other))) {
+            Arena otherArena = arenaOf(other);
+            boolean show;
+            if (viewerArena != null || otherArena != null) {
+                // A match always shows that match and nothing else.
+                show = sameTab(viewerArena, otherArena);
+            } else {
+                show = switch (mode) {
+                    case ALL -> true;
+                    case NONE -> false;
+                    case QUEUE -> {
+                        String otherQueue = plugin.game().queuedMode(other.getUniqueId());
+                        yield viewerQueue == null ? otherQueue == null : viewerQueue.equals(otherQueue);
+                    }
+                };
+            }
+            if (show) {
                 viewer.showPlayer(other);
             } else {
                 viewer.hidePlayer(other);
@@ -243,6 +335,23 @@ public final class Boards {
         return (safe / 60) + ":" + (safe % 60 < 10 ? "0" : "") + (safe % 60);
     }
 
+    /**
+     * The bold title line. During a match it is the mode's own name, so a Rush board says RUSH and a
+     * Classic board says CLASSIC. The lobby, cage, and result phases keep their fixed titles.
+     */
+    private String title(String mode, Arena arena) {
+        Gamemode gamemode = arena == null ? null : plugin.settings().gamemode(arena.gamemodeId);
+        String name = gamemode == null
+                ? ""
+                : ChatColor.stripColor(gamemode.name).toUpperCase(java.util.Locale.ROOT);
+        return switch (mode) {
+            case "starting" -> "&6&lSTARTING";
+            case "ending" -> "&6&lFINISHED";
+            case "grace", "ingame" -> name.isEmpty() ? "&6&lFORTUNE" : Text.bold("&6" + name);
+            default -> "&6&lPILLARS";
+        };
+    }
+
     private static String mode(Game.Session session, Arena arena, Game game) {
         String mode = "lobby";
         if (arena != null) {
@@ -262,9 +371,9 @@ public final class Boards {
 
     private static void line(View view, int score, String text) {
         String entry = ENTRIES[score];
-        Team team = view.board.getTeam("l" + score);
+        Team team = view.board.getTeam(TEAM_PREFIX + score);
         if (team == null) {
-            team = view.board.registerNewTeam("l" + score);
+            team = view.board.registerNewTeam(TEAM_PREFIX + score);
             team.addEntry(entry);
             view.objective.getScore(entry).setScore(score);
         }
@@ -298,8 +407,8 @@ public final class Boards {
     }
 
     private static final class View {
-        private int rows = -1;
         private Scoreboard board;
         private Objective objective;
+        private String rendered = "";
     }
 }

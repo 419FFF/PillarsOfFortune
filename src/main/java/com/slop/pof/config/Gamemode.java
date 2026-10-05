@@ -2,6 +2,8 @@ package com.slop.pof.config;
 
 import org.bukkit.configuration.ConfigurationSection;
 
+import java.util.List;
+
 /**
  * One queueable ruleset. Blank overrides use the global config value.
  */
@@ -15,10 +17,14 @@ public final class Gamemode {
     private final Integer countdown;
     private final Integer queueSeconds;
     private final Integer itemDelaySeconds;
+    private final Boolean randomItems;
+    private final List<String> startItems;
+    private final List<String> description;
 
     public Gamemode(String id, boolean enabled, String name, String icon,
                     Integer minPlayers, Integer maxPlayers, Integer countdown,
-                    Integer queueSeconds, Integer itemDelaySeconds) {
+                    Integer queueSeconds, Integer itemDelaySeconds,
+                    Boolean randomItems, List<String> startItems, List<String> description) {
         this.id = id;
         this.enabled = enabled;
         this.name = name == null || name.isBlank() ? id : name;
@@ -28,6 +34,9 @@ public final class Gamemode {
         this.countdown = countdown;
         this.queueSeconds = queueSeconds;
         this.itemDelaySeconds = itemDelaySeconds;
+        this.randomItems = randomItems;
+        this.startItems = startItems == null ? List.of() : List.copyOf(startItems);
+        this.description = description == null ? List.of() : List.copyOf(description);
     }
 
     public static Gamemode read(String id, ConfigurationSection section) {
@@ -40,13 +49,32 @@ public final class Gamemode {
                 optionalInt(section, "max-players"),
                 optionalInt(section, "countdown"),
                 optionalInt(section, "queue-seconds"),
-                optionalInt(section, "item-delay-seconds")
+                optionalInt(section, "item-delay-seconds"),
+                optionalBool(section, "random-items"),
+                section.getStringList("start-items"),
+                section.getStringList("description")
         );
     }
 
     /** Used when the config has no gamemodes section, so join still works with no menu. */
     public static Gamemode classic() {
-        return new Gamemode("classic", true, "&6Classic", "NETHER_STAR", null, null, null, null, null);
+        return new Gamemode("classic", true, "&6Classic", "BEDROCK", null, null, null, null, null,
+                null, List.of(), List.of());
+    }
+
+    /** True when random item drops are given. A mode with a start kit usually turns these off. */
+    public boolean randomItems() {
+        return randomItems == null || randomItems;
+    }
+
+    /** The kit given when the cages close. Empty means the mode relies on random drops. */
+    public List<String> startItems() {
+        return startItems;
+    }
+
+    /** The GUI lore shown in the mode menu, straight from config. */
+    public List<String> description() {
+        return description;
     }
 
     public int minPlayers(Settings settings) {
@@ -74,5 +102,12 @@ public final class Gamemode {
             return null;
         }
         return section.getInt(path);
+    }
+
+    private static Boolean optionalBool(ConfigurationSection section, String path) {
+        if (!section.contains(path)) {
+            return null;
+        }
+        return section.getBoolean(path);
     }
 }

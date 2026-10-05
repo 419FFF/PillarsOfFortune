@@ -34,6 +34,8 @@ public final class Database implements AutoCloseable {
               best_streak INT NOT NULL DEFAULT 0,
               items INT NOT NULL DEFAULT 0,
               playtime_min INT NOT NULL DEFAULT 0,
+              xp INT NOT NULL DEFAULT 0,
+              level INT NOT NULL DEFAULT 1,
               updated_at TIMESTAMP NULL
             )
             """;
@@ -86,13 +88,38 @@ public final class Database implements AutoCloseable {
         config.setPoolName("PillarsOfFortune");
         config.setConnectionTimeout(10_000L);
         source = new HikariDataSource(config);
-        try (Connection conn = source.getConnection();
-             PreparedStatement ps = conn.prepareStatement(CREATE)) {
-            ps.execute();
+        try (Connection conn = source.getConnection()) {
+            try (PreparedStatement ps = conn.prepareStatement(CREATE)) {
+                ps.execute();
+            }
+            // Databases made before leveling get the new columns here. Columns are never dropped.
+            ensureColumn(conn, "xp INT NOT NULL DEFAULT 0");
+            ensureColumn(conn, "level INT NOT NULL DEFAULT 1");
         } catch (SQLException e) {
             source.close();
             source = null;
             throw new IllegalStateException("Could not create players table", e);
+        }
+    }
+
+    private void ensureColumn(Connection conn, String definition) {
+        String name = definition.substring(0, definition.indexOf(' '));
+        try {
+            if (hasColumn(conn, "players", name) || hasColumn(conn, "PLAYERS", name.toUpperCase(Locale.ROOT))) {
+                return;
+            }
+            try (PreparedStatement ps = conn.prepareStatement("ALTER TABLE players ADD COLUMN " + definition)) {
+                ps.execute();
+            }
+            logger.info("Added the " + name + " column to players.");
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "Could not add the " + name + " column", e);
+        }
+    }
+
+    private static boolean hasColumn(Connection conn, String table, String column) throws SQLException {
+        try (ResultSet rs = conn.getMetaData().getColumns(null, null, table, column)) {
+            return rs.next();
         }
     }
 
@@ -137,7 +164,7 @@ public final class Database implements AutoCloseable {
         if (name == null || name.isBlank()) {
             return null;
         }
-        String sql = "SELECT uuid, name, wins, kills, deaths, games, streak, best_streak, items, playtime_min "
+        String sql = "SELECT uuid, name, wins, kills, deaths, games, streak, best_streak, items, playtime_min, xp, level "
                 + "FROM players WHERE LOWER(name) = LOWER(?)";
         try (Connection conn = source.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -197,22 +224,42 @@ public final class Database implements AutoCloseable {
         save(stats);
     }
 
+    /** Top wins, the default board. */
     public List<TopEntry> top(int limit) {
+        return top(Leaderboard.WINS, limit);
+    }
+
+    /**
+     * Top rows for one board. {@code board.column} is a fixed column name from the enum, never
+     * user input, so pasting it into the statement is safe.
+     */
+    public List<TopEntry> top(Leaderboard board, int limit) {
+        Leaderboard kind = board == null ? Leaderboard.WINS : board;
         int size = Math.max(1, limit);
-        String sql = "SELECT name, wins FROM players WHERE wins > 0 ORDER BY wins DESC, name ASC LIMIT ?";
+        String column = kind.column;
+        String sql = "SELECT name, " + column + " AS score FROM players WHERE " + column
+                + " > 0 ORDER BY " + column + " DESC, name ASC LIMIT ?";
         List<TopEntry> rows = new ArrayList<>();
         try (Connection conn = source.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, size);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    rows.add(new TopEntry(rs.getString("name"), rs.getInt("wins")));
+                    rows.add(new TopEntry(rs.getString("name"), rs.getInt("score")));
                 }
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Leaderboard query failed", e);
         }
         return rows;
+    }
+
+    /** Stores the level and the xp inside it, after a leveling rollup. */
+    public void setLevelXp(UUID uuid, int level, int xp) {
+        Stats stats = require(uuid);
+        stats.level = Math.max(1, level);
+        stats.xp = Math.max(0, xp);
+        save(stats);
     }
 
     private Stats require(UUID uuid) {
@@ -224,7 +271,7 @@ public final class Database implements AutoCloseable {
     }
 
     private Stats load(UUID uuid) {
-        String sql = "SELECT uuid, name, wins, kills, deaths, games, streak, best_streak, items, playtime_min "
+        String sql = "SELECT uuid, name, wins, kills, deaths, games, streak, best_streak, items, playtime_min, xp, level "
                 + "FROM players WHERE uuid = ?";
         try (Connection conn = source.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -252,12 +299,14 @@ public final class Database implements AutoCloseable {
         stats.bestStreak = rs.getInt("best_streak");
         stats.items = rs.getInt("items");
         stats.playtimeMin = rs.getInt("playtime_min");
+        stats.xp = rs.getInt("xp");
+        stats.level = Math.max(1, rs.getInt("level"));
         return stats;
     }
 
     private void insert(Stats stats) {
-        String sql = "INSERT INTO players (uuid, name, wins, kills, deaths, games, streak, best_streak, items, playtime_min, updated_at) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+        String sql = "INSERT INTO players (uuid, name, wins, kills, deaths, games, streak, best_streak, items, playtime_min, xp, level, updated_at) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
         try (Connection conn = source.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             bind(ps, stats);
@@ -269,7 +318,7 @@ public final class Database implements AutoCloseable {
 
     private void save(Stats stats) {
         String sql = "UPDATE players SET name = ?, wins = ?, kills = ?, deaths = ?, games = ?, streak = ?, "
-                + "best_streak = ?, items = ?, playtime_min = ?, updated_at = CURRENT_TIMESTAMP WHERE uuid = ?";
+                + "best_streak = ?, items = ?, playtime_min = ?, xp = ?, level = ?, updated_at = CURRENT_TIMESTAMP WHERE uuid = ?";
         try (Connection conn = source.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, stats.name);
@@ -281,7 +330,9 @@ public final class Database implements AutoCloseable {
             ps.setInt(7, stats.bestStreak);
             ps.setInt(8, stats.items);
             ps.setInt(9, stats.playtimeMin);
-            ps.setString(10, stats.uuid.toString());
+            ps.setInt(10, stats.xp);
+            ps.setInt(11, Math.max(1, stats.level));
+            ps.setString(12, stats.uuid.toString());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Could not save stats", e);
@@ -299,6 +350,8 @@ public final class Database implements AutoCloseable {
         ps.setInt(8, stats.bestStreak);
         ps.setInt(9, stats.items);
         ps.setInt(10, stats.playtimeMin);
+        ps.setInt(11, stats.xp);
+        ps.setInt(12, Math.max(1, stats.level));
     }
 
     public static String trimName(String name) {

@@ -26,6 +26,24 @@ public final class Text {
         return ChatColor.stripColor(color(input));
     }
 
+    /**
+     * Makes text bold. A colour code clears bold, so the bold code goes right after a leading
+     * colour code, for example {@code &6Rush} becomes {@code &6&lRush}.
+     */
+    public static String bold(String input) {
+        if (input == null || input.isEmpty()) {
+            return "";
+        }
+        if (input.contains("&l") || input.contains("\u00A7l")) {
+            return input;
+        }
+        if (input.length() >= 2 && input.charAt(0) == '&'
+                && "0123456789abcdef".indexOf(Character.toLowerCase(input.charAt(1))) >= 0) {
+            return input.substring(0, 2) + "&l" + input.substring(2);
+        }
+        return "&l" + input;
+    }
+
     public static void title(Player player, String title, String subtitle, int seconds) {
         String t = color(title == null ? "" : title);
         String s = color(subtitle == null ? "" : subtitle);

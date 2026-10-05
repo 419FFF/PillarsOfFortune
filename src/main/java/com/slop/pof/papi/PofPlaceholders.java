@@ -69,6 +69,9 @@ public final class PofPlaceholders extends PlaceholderExpansion {
             case "best_streak", "beststreak" -> stat(stats, stats == null ? 0 : stats.bestStreak);
             case "items" -> stat(stats, stats == null ? 0 : stats.items);
             case "playtime", "playtime_min" -> stat(stats, stats == null ? 0 : stats.playtimeMin);
+            case "level" -> stat(stats, stats == null ? 1 : Math.max(1, stats.level));
+            case "xp" -> stat(stats, stats == null ? 0 : stats.xp);
+            case "xp_next" -> stat(stats, plugin.settings().levels().nextCost(stats == null ? 1 : stats.level));
             case "name" -> player.getName();
             case "arena" -> session == null || session.arenaId == 0 ? "0" : String.valueOf(session.arenaId);
             case "alive" -> session != null && session.alive ? "true" : "false";
@@ -101,8 +104,9 @@ public final class PofPlaceholders extends PlaceholderExpansion {
         if ("name".equals(field)) {
             return entry.name;
         }
-        if ("wins".equals(field)) {
-            return String.valueOf(entry.wins);
+        if ("wins".equals(field) || "value".equals(field) || "kills".equals(field)
+                || "streak".equals(field) || "level".equals(field)) {
+            return String.valueOf(entry.value);
         }
         return "";
     }

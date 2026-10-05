@@ -44,13 +44,23 @@ public final class GamemodeMenu implements Listener {
         ItemStack stack = new ItemStack(Items.material(mode.icon, org.bukkit.Material.NETHER_STAR));
         ItemMeta meta = stack.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(Text.color(mode.name));
+            meta.setDisplayName(Text.color(Text.bold(mode.name)));
             List<String> lore = new ArrayList<>();
+            for (String line : mode.description()) {
+                lore.add(Text.color(line));
+            }
+            if (!mode.description().isEmpty()) {
+                lore.add("");
+            }
             lore.add(settings.text("gamemode-lore-players",
                     "min", String.valueOf(mode.minPlayers(settings)),
                     "max", String.valueOf(mode.maxPlayers(settings))));
             lore.add(settings.text("gamemode-lore-start", "seconds", String.valueOf(mode.countdown(settings))));
-            lore.add(settings.text("gamemode-lore-items", "seconds", String.valueOf(mode.itemDelay(settings))));
+            if (mode.randomItems()) {
+                lore.add(settings.text("gamemode-lore-items", "seconds", String.valueOf(mode.itemDelay(settings))));
+            } else {
+                lore.add(settings.text("gamemode-lore-kit"));
+            }
             meta.setLore(lore);
             stack.setItemMeta(meta);
         }

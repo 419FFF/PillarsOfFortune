@@ -4,7 +4,7 @@
 # config-version is how far this file has been upgraded.
 # DO NOT CHANGE config-version. On startup and /pof reload the plugin walks an older
 # number forward to this jar's version, keeps your values, and writes config.yml.vN.bak first.
-config-version: 10
+config-version: 20
 
 # Chat prefix placed in front of plugin messages. Use & color codes.
 prefix: "&8[&6PoF&8]&r"
@@ -88,6 +88,12 @@ max-players: 12
 countdown: 10
 # Seconds to wait in queue once enough players are ready. VIP /pof start can cut this to 5.
 queue-seconds: 30
+# How often the "waiting for players" reminder repeats to a short queue, in seconds.
+queue-reminder-seconds: 20
+# How often the "you are alone" line repeats, in seconds. Kept higher so it is not spammy.
+queue-alone-seconds: 60
+# Seconds-left values that send the "starting soon" line to everyone in that queue.
+queue-broadcast-seconds: [30, 20, 10, 5]
 # Seconds between item drops after the first one. Sudden death shortens this to 2 seconds.
 item-seconds: 5
 # Seconds after the cages open before the first items are given. 0 gives an item immediately.
@@ -104,34 +110,68 @@ lobby-gamemode: ADVENTURE
 # Queues players can join. A mode listed here is on unless enabled is set to false.
 # One enabled mode is what /pof join and the queue item use. Two or more open a chest menu.
 # Leave min-players, max-players, countdown, queue-seconds, or item-delay-seconds out to use the global values.
+# random-items: false stops the random drops; start-items: gives an exact kit when the cages close.
 gamemodes:
-  # Default mode. Join uses this while it is the only one turned on.
+  # Default mode. Random items the whole round.
   classic:
     enabled: true
     name: "&6Classic"
-    icon: NETHER_STAR
-  # Example of a second mode. Set enabled to true to show the mode menu.
+    icon: BEDROCK
+    description:
+      - "&7The original Pillars of Fortune."
+      - "&7Random items the whole round."
+      - "&7Last player standing wins."
+  # Pure PvP. Everyone starts fully geared and no random items follow.
+  rush:
+    enabled: true
+    name: "&cRush"
+    icon: DIAMOND_SWORD
+    description:
+      - "&7Pure PvP - no random items."
+      - "&7Everyone starts with diamond armor,"
+      - "&7an iron sword, blocks, and tools."
+    min-players: 2
+    max-players: 12
+    random-items: false
+    start-items:
+      - DIAMOND_HELMET
+      - DIAMOND_CHESTPLATE
+      - DIAMOND_LEGGINGS
+      - DIAMOND_BOOTS
+      - IRON_SWORD
+      - "COBBLESTONE|amount:64"
+      - "COBBLESTONE|amount:64"
+      - FISHING_ROD
+      - "WOOD|amount:64"
+      - "WOOD|amount:64"
+      - WATER_BUCKET
+      - WOOD_AXE
+      - WOOD_PICKAXE
+      - "GOLDEN_APPLE|amount:3"
+  # Example of a lower-player mode. Set enabled to true to show it in the mode menu.
   custom:
     enabled: false
     name: "&bCustom"
     icon: DIAMOND
+    description:
+      - "&7An example mode you can edit."
     min-players: 2
     max-players: 8
     countdown: 10
     item-delay-seconds: 5
 
 # Fire charges thrown by living players during a round.
-# Right-click launches a fireball along the crosshair. On impact, players are pushed away from the
-# blast (not just north/south/east/west) and take the damage below once. Vanilla explosion damage is cancelled.
+# Right-click launches a fireball along the crosshair. The push, the damage, and the way the blast
+# scales with jumping match the bedwars1058 fork. Vanilla explosion damage is cancelled.
 fireball:
-  # Blocks per tick along the look direction. Higher is faster.
-  speed: 1.6
-  # Horizontal launch strength away from the explosion. Closer players are pushed harder.
-  knockback-horizontal: 2.6
-  # Upward pop added on top of the horizontal push.
-  knockback-vertical: 1.1
-  # Players inside this many blocks of the blast are affected.
-  radius: 3.5
+  # Blocks per tick along the look direction. bedwars1058 calls this speed-multiplier (default 10).
+  speed: 10.0
+  # Horizontal push away from the blast. bedwars1058 default is 1.0.
+  knockback-horizontal: 1.0
+  # Upward pop. A jumping player is pushed higher. bedwars1058 default is 0.65.
+  knockback-vertical: 0.65
+  # Players inside this many blocks of the blast are affected. bedwars1058 default is 3.
+  radius: 3.0
   # Seconds before the same player can throw another charge.
   cooldown: 0.5
   # Hearts are half this number. 2.0 is one heart.
@@ -139,8 +179,8 @@ fireball:
   damage-enemy: 2.0
   # When false, the blast does not set blocks on fire.
   fire: false
-  # How strongly the blast breaks blocks. 0 breaks nothing.
-  yield: 2.0
+  # How strongly the blast breaks blocks. bedwars1058 uses its explosion size here (default 3).
+  yield: 3.0
 
 # Default stack size for a block-pool item that has no items.amounts entry.
 # The roll is weighted toward the low end, same shape as the original script, scaled to this range.
@@ -161,6 +201,34 @@ rates:
   blocks: 72
   chaos: 13
 
+# Leveling, modeled on BedWars1058. XP fills the bar and the level, and rankups cost more.
+leveling:
+  enabled: true
+  # Used where {level_name} appears. {level} is the number.
+  level-format: "&e{level}"
+  # XP sources. A win also adds winstreak-step for each extra win in a row, up to winstreak-cap.
+  xp-per-win: 100
+  xp-per-kill: 10
+  xp-per-game: 5
+  xp-per-minute: 2
+  # Win bonus per extra win in a row, and the most that bonus can ever be.
+  winstreak-step: 10
+  winstreak-cap: 100
+  # Each level costs rankup-growth times the one before, so it keeps getting harder, and the cost
+  # never passes rankup-cap. Level 1 costs rankup-base.
+  rankup-base: 500
+  rankup-growth: 1.15
+  rankup-cap: 20000
+  progress-bar:
+    length: 20
+    symbol: "|"
+    unlocked-color: "&b"
+    locked-color: "&7"
+  # Optional overrides. An exact level wins, then a from-to range; everything else uses the curve.
+  # rankups:
+  #   1: 500
+  #   50-99: 5000
+
 # Items given in the lobby. Materials are Bukkit 1.8 names. Names support & colors.
 lobby-items:
   # Slot 0. Right-click or /pof join.
@@ -172,6 +240,23 @@ lobby-items:
   # Slot 4 for players with slop.pof.vip. Right-click skips the queue timer to 5 seconds.
   vip-material: DIAMOND
   vip-name: "&6&lStart Match"
+  # Slot 8 while you are out of the queue. Runs the command as the player. Off by default.
+  hub-enabled: false
+  hub-material: BED
+  hub-name: "&a&lHub"
+  hub-command: "hub"
+
+# Lobby visibility toggle. Right-click the dye in your hotbar to cycle the three states.
+visibility:
+  # Hotbar slot. 7 is the 8th slot. Slot 8 is the 9th and holds the leave item while queued.
+  slot: 7
+  item: INK_SACK
+  # Dye data values on 1.8: 0 ink sac, 1 red, 2 green, 4 lapis, 10 lime, 11 yellow, 15 bone meal.
+  dye-all: 10
+  dye-queue: 11
+  dye-none: 8
+  # true shows everyone until the player changes it. false hides everyone by default.
+  show-all-by-default: true
 
 # Wins, kills, and the other stats. h2 needs no extra setup. mysql uses the host below.
 # Changing these and running /pof reload reconnects. Tables are not deleted.
@@ -233,6 +318,7 @@ messages:
   gamemode-lore-players: "&7Players: &f{min}&7-&f{max}"
   gamemode-lore-start: "&7Cages: &f{seconds}s"
   gamemode-lore-items: "&7Items after: &f{seconds}s"
+  gamemode-lore-kit: "&7Starts with a full kit"
   nothing-to-leave: "&7Nothing to leave."
   forfeited: "&7You forfeited."
   cannot-during-match: "&cYou cannot use that during a match."
@@ -241,8 +327,30 @@ messages:
   countdown-skipped: "&eCountdown skipped to &f5&e seconds!"
   timer-set: "&aQueue timer set to 5 seconds."
   timer-already: "&7Timer already at &f{time}&7s."
-  help: "&6/pof join&7, &6leave&7, &6stats&7, &6top"
-  help-admin: "&cAdmin: &6start stop setlobby regen arenas debug reload"
+  queue-waiting: "&7[{mode}&7] &f{count}&7/&f{min} &7players. Waiting for more."
+  queue-alone: "&eYou are alone in the {mode} &equeue. &7Waiting for another player."
+  arenas-busy: "&cAll arenas are busy right now. &7You keep your place in the queue."
+  visibility-name-all: "&aVisible: &fEveryone"
+  visibility-name-queue: "&eVisible: &fQueue only"
+  visibility-name-none: "&cVisible: &fNobody"
+  visibility-lore: "&7Right-click to cycle."
+  visibility-changed: "&7Visibility set to {mode}&7."
+  xp-win: "&a+{xp} XP &7(win)"
+  xp-win-bonus: "&a(+{bonus} XP &7streak&a)"
+  xp-kill: "&a+{xp} XP &7(kill)"
+  xp-game: "&a+{xp} XP &7(match played)"
+  xp-minute: "&a+{xp} XP &7(time played)"
+  xp-admin: "&a+{xp} XP &7(from an admin)"
+  xp-done: "&a{player} &7is now level &e{level} &7with &e{xp} &7XP."
+  xp-usage: "&cUsage: /pof xp <give|set|setlevel> <player> <amount>"
+  level-header: "&6{player}&7's level"
+  level-bar: "&8{progress}"
+  level-line: "&7Level &e{level} &8| &7XP &e{xp}&7/&f{xp_next} &8| &7{percent}%"
+  level-up: "&6&lLEVEL UP! &r&7You are now level &e{level}&7."
+  title-level-up: "&6&lLEVEL UP"
+  subtitle-level-up: "&7Level &e{level}"
+  help: "&6/pof join&7, &6leave&7, &6stats&7, &6level&7, &6top [wins|kills|streak|level]"
+  help-admin: "&cAdmin: &6start stop setlobby regen arenas debug reload xp"
   help-console: "[PoF] /pof stop | regen | arenas | reload"
   debug-on: "&7Debug &aON"
   debug-off: "&7Debug &cOFF"
@@ -253,10 +361,11 @@ messages:
   stats-line1: "&e{wins} &7wins  &e{kills} &7kills  &e{deaths} &7deaths"
   stats-line2: "&e{games} &7games  &e{streak} &7streak  &e{best} &7best"
   stats-line3: "&e{items} &7items rolled  &e{mins} &7min played"
-  top-header: "&6Top wins"
-  top-line: "&e{rank}. &f{player} &7- &6{wins} &7wins"
-  top-empty: "&7No games recorded yet."
+  top-header: "&6Top &f{board}"
+  top-line: "&e{rank}. &f{player} &7- &6{value}"
+  top-empty: "&7No {board} recorded yet."
   top-error: "&cLeaderboard is unavailable."
+  top-unknown: "&cUnknown board. Use &fwins&c, &fkills&c, &fstreak&c, or &flevel&c."
   lobby-set: "&aLobby set."
   stopped-arena: "&cStopped arena {id}."
   stopped-all: "&cAll arenas stopped."
@@ -310,15 +419,20 @@ messages:
   # The first line is the title (32 characters). Each line under it is 32 characters. At most 15 of those.
   # A blank line leaves a gap. {luckperms_prefix}, {luckperms_suffix}, and %placeholder% use the viewer.
   # Every mode: {ip} {wins} {kills} {deaths} {streak} {best} {games} {items} {mins} {queue} {max} {mode}
+  # Title and date: {title} {date}. Leveling: {level} {level_name} {xp} {xp_next} {progress}
+  # {title} is the bold line: PILLARS in the lobby, STARTING in the cage, then the mode name
+  # (RUSH, CLASSIC, ...) while playing, and FINISHED at the end. {date} is MM/DD/YY.
+  # Every board ends with the level right next to its {progress} bar, just above {ip}.
+  # There is no blank spacer line: a line that is only a colour code shows as an empty gap.
   # {start} is board-start, or board-start-waiting while that queue is still short.
   # In a match: {id} {alive} {starts} {item} {time} {grace} {session_kills} {state} {clock}
   # {state} is already colored. {clock} is m:ss. {starts} {item} {time} {grace} are seconds.
-  board-lobby: "&6&lPILLARS\n&6/pof join\n&fWins: &e{wins}\n&fKills: &e{kills}\n&fStreak: &e{streak}\n&8\n&e{ip}"
-  board-queued: "&6&lPILLARS\n{start}\n&fQueue: &e{queue}&7/&f{max}\n&8\n&e{ip}"
-  board-starting: "&6&lSTARTING\n&fArena: &e{id}\n&fStarts: &e{starts}s\n&fAlive: &e{alive}\n&8\n&e{ip}"
-  board-grace: "&6&lFORTUNE\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n&aGrace: &f{grace}s\n&8\n&e{ip}"
-  board-ingame: "&6&lFORTUNE\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n&8\n&e{ip}"
-  board-ending: "&6&lFINISHED\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&8\n&e{ip}"
+  board-lobby: "{title}\n&7{date}\n&fWins: &e{wins}\n&fKills: &e{kills}\n&fStreak: &e{streak}\n&fLevel: {level_name} {progress}\n&e{ip}"
+  board-queued: "{title}\n&7{date}\n{start}\n&fQueue: &e{queue}&7/&f{max}\n&fLevel: {level_name} {progress}\n&e{ip}"
+  board-starting: "{title}\n&7{date}\n&fArena: &e{id}\n&fStarts: &e{starts}s\n&fAlive: &e{alive}\n&fLevel: {level_name} {progress}\n&e{ip}"
+  board-grace: "{title}\n&7{date}\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n&aGrace: &f{grace}s\n&fLevel: {level_name} {progress}\n&e{ip}"
+  board-ingame: "{title}\n&7{date}\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n&fLevel: {level_name} {progress}\n&e{ip}"
+  board-ending: "{title}\n&7{date}\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fLevel: {level_name} {progress}\n&e{ip}"
   # {value} is the countdown in seconds. {start} inserts one of these two lines.
   board-start: "&fStart: &e{value}s"
   # Shown through {start} while the queue does not have enough players.

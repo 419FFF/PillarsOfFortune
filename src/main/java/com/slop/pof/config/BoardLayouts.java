@@ -94,13 +94,15 @@ public final class BoardLayouts {
 
     /** Layout used when the file has neither a board string nor the old per-line keys. */
     public static String builtin(String mode) {
+        String head = "{title}\n&7{date}";
+        String tail = "&fLevel: {level_name} {progress}\n&e{ip}";
         return switch (mode) {
-            case "queued" -> "&6&lPILLARS\n{start}\n&fQueue: &e{queue}&7/&f{max}\n&8\n&e{ip}";
-            case "starting" -> "&6&lSTARTING\n&fArena: &e{id}\n&fStarts: &e{starts}s\n&fAlive: &e{alive}\n&8\n&e{ip}";
-            case "grace" -> "&6&lFORTUNE\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n&aGrace: &f{grace}s\n&8\n&e{ip}";
-            case "ingame" -> "&6&lFORTUNE\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n&8\n&e{ip}";
-            case "ending" -> "&6&lFINISHED\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&8\n&e{ip}";
-            default -> "&6&lPILLARS\n&6/pof join\n&fWins: &e{wins}\n&fKills: &e{kills}\n&fStreak: &e{streak}\n&8\n&e{ip}";
+            case "queued" -> head + "\n{start}\n&fQueue: &e{queue}&7/&f{max}\n" + tail;
+            case "starting" -> "&6&lSTARTING\n&7{date}\n&fArena: &e{id}\n&fStarts: &e{starts}s\n&fAlive: &e{alive}\n" + tail;
+            case "grace" -> "{title}\n&7{date}\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n&aGrace: &f{grace}s\n" + tail;
+            case "ingame" -> "{title}\n&7{date}\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n&fItem: &e{item}s\n&fTime: &e{time}s\n" + tail;
+            case "ending" -> "{title}\n&7{date}\n&fArena: &e{id}\n&fAlive: &e{alive}\n&fKills: &e{session_kills}\n" + tail;
+            default -> head + "\n&fWins: &e{wins}\n&fKills: &e{kills}\n&fStreak: &e{streak}\n" + tail;
         };
     }
 
