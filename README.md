@@ -1,6 +1,6 @@
 Entirely vibecoded Pillars of Fortune plugin for Spigot 1.8.8. Requires Java 17.
 
-Used Grok Build 4.7 (high), along with some prompt assistance from Grok 4.6 (Fast).
+Used Grok Build 4.7 (high), Deepseek 4.1 Flash, along with some prompt assistance from Grok 4.6 (Fast).
 
 Please note that configs can break after updates. Please reconfigure for each version if you plan on updating this plugin.
 
