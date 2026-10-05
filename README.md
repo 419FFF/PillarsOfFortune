@@ -8,7 +8,7 @@ Players are placed onto bedrock pillars in a void world, gear up over the course
 until one winner remains. Almost everything — arena layout, item pools, timings, leveling, messages and
 leaderboards — is configurable in `config.yml`.
 
-Uses some modified code from a (currently) private Bedwars1058 fork
+Uses some modified code from a (currently) private Bedwars1058 fork.
 
 ## Requirements
 
