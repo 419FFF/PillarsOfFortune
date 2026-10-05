@@ -13,10 +13,7 @@ import com.slop.pof.config.Gamemode;
 import com.slop.pof.config.Settings;
 import com.slop.pof.game.Game;
 import com.slop.pof.storage.Stats;
-import com.slop.pof.util.Text;
 
-import java.lang.reflect.Method;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -25,8 +22,6 @@ import java.util.UUID;
 
 public final class Boards {
     private static final String[] ENTRIES = new String[16];
-    private static final String[] TAB_TEAMS = {"t0", "t1", "t2", "t3", "t4"};
-    private static int tabState;
 
     static {
         ChatColor[] colors = {
@@ -42,21 +37,43 @@ public final class Boards {
 
     private final PoFPlugin plugin;
     private final Map<UUID, View> views = new HashMap<>();
+    private final Set<String> uiErrors = new HashSet<>();
 
     public Boards(PoFPlugin plugin) {
         this.plugin = plugin;
     }
 
     public void refresh(Player player) {
-        sidebar(player);
-        tab(player);
+        try {
+            sidebar(player);
+        } catch (Throwable ex) {
+            warnOnce("Scoreboard failed for " + player.getName() + ": " + ex.getMessage());
+        }
+        try {
+            tab(player);
+        } catch (Throwable ex) {
+            warnOnce("Tab failed for " + player.getName() + ": " + ex.getMessage());
+        }
+    }
+
+    private void warnOnce(String message) {
+        if (plugin.isDebug() || uiErrors.add(message)) {
+            plugin.getLogger().warning(message);
+        }
     }
 
     public void clear(Player player) {
         views.remove(player.getUniqueId());
         player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
-        String name = player.getName();
-        player.setPlayerListName(name.length() <= 16 ? name : name.substring(0, 16));
+        // No tab name formatting is applied anywhere, so resetting to the default is enough.
+        player.setPlayerListName(null);
+    }
+
+    /** Rebuilds the sidebar and tab visibility for everyone. Used after /pof reload. */
+    public void refreshAll() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            refresh(player);
+        }
     }
 
     public void clearAll() {
@@ -92,7 +109,7 @@ public final class Boards {
                 ? settings.text(player, "board-start-waiting")
                 : settings.text(player, "board-start", "value", String.valueOf(game.queueTimer(player.getUniqueId())));
         int alive = arena == null ? 0 : arena.aliveCount();
-        String rendered = settings.text(player, "board-" + mode,
+        String rendered = settings.board(player, mode,
                 "ip", settings.serverIp(),
                 "wins", String.valueOf(stats == null ? 0 : stats.wins),
                 "kills", String.valueOf(stats == null ? 0 : stats.kills),
@@ -152,38 +169,12 @@ public final class Boards {
         return out;
     }
 
+    /**
+     * The tab list shows only the people the viewer should see: the same match, or the lobby.
+     * No header, footer, name colours, or team ordering are sent, so nothing can break the tab.
+     */
     private void tab(Player player) {
-        Settings settings = plugin.settings();
-        Game game = plugin.game();
-        Game.Session session = game.session(player);
-        Arena arena = session.arenaId == 0 ? null : plugin.arenas().get(session.arenaId);
-        String colored = listColor(player, session, arena, game) + player.getName();
-        String ip = settings.serverIp();
-        String online = String.valueOf(Bukkit.getOnlinePlayers().size());
-        if (arena == null) {
-            sendHeader(player,
-                    lines(settings.text("tab-header-lobby", "ip", ip)),
-                    lines(settings.text("tab-footer-lobby",
-                            "queue", String.valueOf(game.queueSize()),
-                            "max", String.valueOf(settings.maxPlayers()),
-                            "online", online,
-                            "ip", ip)));
-        } else {
-            sendHeader(player,
-                    lines(settings.text("tab-header-arena",
-                            "id", String.valueOf(arena.id),
-                            "state", prettyState(arena),
-                            "ip", ip)),
-                    lines(settings.text("tab-footer-arena",
-                            "state", prettyState(arena),
-                            "alive", String.valueOf(arena.aliveCount()),
-                            "time", clock(arena),
-                            "online", online,
-                            "ip", ip)));
-        }
-        player.setPlayerListName(trim(colored, 16));
-        applyVisibility(player, arena);
-        sortTab(player);
+        applyVisibility(player, arenaOf(player));
     }
 
     /** Hides everyone who is not in the viewer's current match, or not in the lobby with them. */
@@ -228,16 +219,6 @@ public final class Boards {
         return plugin.arenas().get(session.arenaId);
     }
 
-    private static String listColor(Player player, Game.Session session, Arena arena, Game game) {
-        if (arena == null) {
-            return game.queued(player.getUniqueId()) ? ChatColor.YELLOW.toString() : ChatColor.GRAY.toString();
-        }
-        if (arena.state == Arena.State.ENDING && arena.winner != null && arena.winner.equals(player.getUniqueId())) {
-            return ChatColor.GOLD.toString();
-        }
-        return session.alive ? ChatColor.GREEN.toString() : ChatColor.DARK_GRAY.toString();
-    }
-
     private static String prettyState(Arena arena) {
         return switch (arena.state) {
             case WAITING -> ChatColor.GRAY + "Waiting";
@@ -260,72 +241,6 @@ public final class Boards {
     private static String minutes(int seconds) {
         int safe = Math.max(0, seconds);
         return (safe / 60) + ":" + (safe % 60 < 10 ? "0" : "") + (safe % 60);
-    }
-
-    /** A config {@code \n} becomes a real line break in the tab header or footer. */
-    private static String lines(String text) {
-        return text.replace("\\n", "\n");
-    }
-
-    private void sortTab(Player viewer) {
-        View view = views.get(viewer.getUniqueId());
-        if (view == null || view.board == null) {
-            return;
-        }
-        for (String id : TAB_TEAMS) {
-            if (view.board.getTeam(id) == null) {
-                view.board.registerNewTeam(id);
-            }
-        }
-        Arena viewerArena = arenaOf(viewer);
-        Set<String> shown = new HashSet<>();
-        for (Player other : Bukkit.getOnlinePlayers()) {
-            if (!sameTab(viewerArena, arenaOf(other))) {
-                continue;
-            }
-            shown.add(other.getName());
-            String teamId = tabGroup(other);
-            for (String id : TAB_TEAMS) {
-                Team team = view.board.getTeam(id);
-                if (team != null && team.hasEntry(other.getName()) && !id.equals(teamId)) {
-                    team.removeEntry(other.getName());
-                }
-            }
-            Team target = view.board.getTeam(teamId);
-            if (target != null && !target.hasEntry(other.getName())) {
-                target.addEntry(other.getName());
-            }
-        }
-        for (String id : TAB_TEAMS) {
-            Team team = view.board.getTeam(id);
-            if (team == null) {
-                continue;
-            }
-            for (String entry : new ArrayList<>(team.getEntries())) {
-                if (!shown.contains(entry)) {
-                    team.removeEntry(entry);
-                }
-            }
-        }
-    }
-
-    private String tabGroup(Player player) {
-        Game game = plugin.game();
-        Game.Session session = game.peek(player.getUniqueId());
-        Arena arena = session == null || session.arenaId == 0 ? null : plugin.arenas().get(session.arenaId);
-        if (arena != null && arena.state == Arena.State.ENDING && arena.winner != null && arena.winner.equals(player.getUniqueId())) {
-            return "t0";
-        }
-        if (arena != null && session.alive) {
-            return "t1";
-        }
-        if (game.queued(player.getUniqueId())) {
-            return "t2";
-        }
-        if (arena != null) {
-            return "t4";
-        }
-        return "t3";
     }
 
     private static String mode(Game.Session session, Arena arena, Game game) {
@@ -380,57 +295,6 @@ public final class Boards {
             rest = rest.substring(0, 16);
         }
         return new String[]{prefix, rest};
-    }
-
-    private static String trim(String text, int max) {
-        if (text.length() <= max) {
-            return text;
-        }
-        return text.substring(0, max);
-    }
-
-    private static void sendHeader(Player player, String header, String footer) {
-        if (tabState == 2) {
-            return;
-        }
-        if (Bukkit.getPluginManager().getPlugin("ProtocolLib") == null) {
-            tabState = 2;
-            return;
-        }
-        try {
-            Class<?> library = Class.forName("com.comphenix.protocol.ProtocolLibrary");
-            Object manager = library.getMethod("getProtocolManager").invoke(null);
-            Class<?> packetTypeClass = Class.forName("com.comphenix.protocol.PacketType");
-            Object play = packetTypeClass.getField("Play").get(null);
-            Object server = play.getClass().getField("Server").get(play);
-            Object type = server.getClass().getField("PLAYER_LIST_HEADER_FOOTER").get(server);
-            Object packet = manager.getClass().getMethod("createPacket", packetTypeClass).invoke(manager, type);
-            Class<?> wrapped = Class.forName("com.comphenix.protocol.wrappers.WrappedChatComponent");
-            Object headerComponent = component(wrapped, header);
-            Object footerComponent = component(wrapped, footer);
-            Object modifier = packet.getClass().getMethod("getChatComponents").invoke(packet);
-            Method write = modifier.getClass().getMethod("write", int.class, Object.class);
-            write.invoke(modifier, 0, headerComponent);
-            write.invoke(modifier, 1, footerComponent);
-            Class<?> container = Class.forName("com.comphenix.protocol.events.PacketContainer");
-            manager.getClass().getMethod("sendServerPacket", Player.class, container).invoke(manager, player, packet);
-            tabState = 1;
-        } catch (Throwable ignored) {
-            tabState = 2;
-        }
-    }
-
-    private static Object component(Class<?> wrapped, String text) throws Exception {
-        String json = "{\"text\":\"" + jsonEscape(text) + "\"}";
-        try {
-            return wrapped.getMethod("fromJson", String.class).invoke(null, json);
-        } catch (NoSuchMethodException ex) {
-            return wrapped.getMethod("fromText", String.class).invoke(null, text);
-        }
-    }
-
-    private static String jsonEscape(String text) {
-        return text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "");
     }
 
     private static final class View {

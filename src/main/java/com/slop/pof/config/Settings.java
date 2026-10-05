@@ -86,6 +86,7 @@ public final class Settings {
     private final boolean playtimeOnlineOnly;
     private final Map<String, String> sounds;
     private final Map<String, String> messages;
+    private final Map<String, String> defaultMessages;
     private final List<String> weapons;
     private final List<String> armor;
     private final List<String> blocks;
@@ -171,6 +172,7 @@ public final class Settings {
         playtimeOnlineOnly = c.getBoolean("stats.playtime-online-only", true);
         sounds = readSection(c, "sounds");
         messages = readSection(c, "messages");
+        defaultMessages = readDefaultSection(c, "messages");
         weapons = list(c, "items.weapons");
         armor = list(c, "items.armor");
         blocks = list(c, "items.blocks");
@@ -213,9 +215,13 @@ public final class Settings {
         return arenaSpacing + "/" + resetRadius + "/" + buildRadius + "/" + borderKill + "/" + clearRadius;
     }
 
-    /** Box half-size used when an arena is wiped. Always larger than the playable arena. */
+    /** Box half-size used when an arena is wiped. Always larger than the playable arena and the pillars. */
     public int resetReach() {
-        int play = Math.max(buildRadius, Math.max(Math.abs(borderKill), Math.max(clearRadius, pillarRadius + 4)));
+        int farthest = Math.abs(pillarRadius);
+        for (int[] offset : offsets) {
+            farthest = Math.max(farthest, Math.max(Math.abs(offset[0]), Math.abs(offset[1])));
+        }
+        int play = Math.max(buildRadius, Math.max(Math.abs(borderKill), Math.max(clearRadius, farthest + 4)));
         return Math.max(resetRadius, play + 16);
     }
 
@@ -263,6 +269,25 @@ public final class Settings {
         return Placeholders.apply(player, Text.color(apply(key, pairs)));
     }
 
+    /**
+     * Sidebar layout for one mode. Old per-line keys are used when {@code board-}* is missing
+     * or still the shipped default, so an older config keeps its wording and the numbers still change.
+     */
+    public String board(Player player, String mode, String... pairs) {
+        String layout = messages.get("board-" + mode);
+        // The jar default is the baseline for "the admin never touched board-*". Comparing against
+        // BoardLayouts.builtin() never matched, so an old config kept the shipped layout and its
+        // per-line wording was ignored.
+        String shipped = defaultMessages.get("board-" + mode);
+        boolean untouched = layout == null || layout.isBlank() || layout.equals("board-" + mode)
+                || (shipped != null && BoardLayouts.same(layout, shipped));
+        String legacy = BoardLayouts.hasLegacy(messages::get) ? BoardLayouts.compose(mode, messages::get) : null;
+        if (untouched) {
+            layout = legacy != null ? legacy : BoardLayouts.builtin(mode);
+        }
+        return Placeholders.apply(player, Text.color(applyText(layout, pairs)));
+    }
+
     public String raw(String key, String... pairs) {
         return raw(null, key, pairs);
     }
@@ -295,20 +320,47 @@ public final class Settings {
     }
 
     private String apply(String key, String... pairs) {
-        String body = messages.getOrDefault(key, key);
+        return applyText(messages.getOrDefault(key, key), pairs);
+    }
+
+    private static String applyText(String body, String... pairs) {
+        String text = body == null ? "" : body;
         for (int i = 0; i + 1 < pairs.length; i += 2) {
-            body = body.replace("{" + pairs[i] + "}", pairs[i + 1] == null ? "" : pairs[i + 1]);
+            text = text.replace("{" + pairs[i] + "}", pairs[i + 1] == null ? "" : pairs[i + 1]);
         }
-        return body;
+        return text;
+    }
+
+    /** The values shipped inside the jar, used to tell a default from an admin's edit. */
+    private static Map<String, String> readDefaultSection(FileConfiguration c, String path) {
+        Map<String, String> map = new HashMap<>();
+        if (c.getDefaults() == null) {
+            return map;
+        }
+        ConfigurationSection defaults = c.getDefaults().getConfigurationSection(path);
+        if (defaults != null) {
+            for (String key : defaults.getKeys(false)) {
+                map.put(key, defaults.getString(key, ""));
+            }
+        }
+        return map;
     }
 
     private static Map<String, String> readSection(FileConfiguration c, String path) {
         Map<String, String> map = new HashMap<>();
-        if (c.getConfigurationSection(path) == null) {
-            return map;
+        ConfigurationSection section = c.getConfigurationSection(path);
+        if (section != null) {
+            for (String key : section.getKeys(false)) {
+                map.put(key, c.getString(path + "." + key, ""));
+            }
         }
-        for (String key : c.getConfigurationSection(path).getKeys(false)) {
-            map.put(key, c.getString(path + "." + key, ""));
+        if (c.getDefaults() != null) {
+            ConfigurationSection defaults = c.getDefaults().getConfigurationSection(path);
+            if (defaults != null) {
+                for (String key : defaults.getKeys(false)) {
+                    map.putIfAbsent(key, defaults.getString(key, ""));
+                }
+            }
         }
         return map;
     }

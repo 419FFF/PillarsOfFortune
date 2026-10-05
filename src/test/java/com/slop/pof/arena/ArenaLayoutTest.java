@@ -40,6 +40,19 @@ class ArenaLayoutTest {
         }
     }
 
+    /**
+     * Every arena id must land on its own spot. A repeated center is what made the arena list
+     * look like it was duplicating arenas.
+     */
+    @Test
+    void arenaCentersAreUnique() {
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (int index = 0; index < 64; index++) {
+            int[] step = ArenaLayout.steps(index);
+            assertTrue(seen.add(step[0] + "," + step[1]), "duplicate center at index " + index);
+        }
+    }
+
     @Test
     void rejectsSpotsPastTheVanillaEdge() {
         assertFalse(ArenaLayout.inside(29_999_000, 0, 2000));

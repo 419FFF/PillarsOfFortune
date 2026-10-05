@@ -5,9 +5,13 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.logging.Level;
@@ -19,7 +23,7 @@ import java.util.logging.Level;
  * The previous file is saved as {@code config.yml.vN.bak} before the converted file is written.
  */
 public final class ConfigUpdater {
-    public static final int CURRENT = 9;
+    public static final int CURRENT = 10;
 
     private ConfigUpdater() {
     }
@@ -27,40 +31,63 @@ public final class ConfigUpdater {
     /** @return how many keys were added, or 0 when the file is already current */
     public static int update(JavaPlugin plugin) {
         FileConfiguration config = plugin.getConfig();
-        int found = config.contains("config-version") ? config.getInt("config-version") : 0;
-        if (found == CURRENT) {
-            return 0;
-        }
+        int found = own(config, "config-version") ? config.getInt("config-version") : 0;
         if (found > CURRENT) {
             plugin.getLogger().warning("config.yml says version " + found
                     + ", but this jar understands " + CURRENT + ". The file was left unchanged.");
             return 0;
         }
-        YamlConfiguration defaults = defaults(plugin);
+        byte[] raw = resource(plugin);
+        if (raw == null) {
+            return 0;
+        }
+        String template = new String(raw, StandardCharsets.UTF_8);
+        YamlConfiguration defaults = defaults(raw, plugin);
         if (defaults == null) {
             return 0;
         }
+        File file = new File(plugin.getDataFolder(), "config.yml");
+        String disk = "";
+        if (file.isFile()) {
+            try {
+                disk = Files.readString(file.toPath(), StandardCharsets.UTF_8);
+            } catch (IOException ex) {
+                plugin.getLogger().log(Level.WARNING, "Could not read config.yml before updating it.", ex);
+            }
+        }
+        boolean migrate = found < CURRENT;
+        boolean healBoards = BoardLayouts.hasLegacy(key -> own(config, "messages." + key) ? config.getString("messages." + key) : null);
+        boolean restoreComments = ConfigLayout.needsCommentRestore(disk, template);
+        if (!migrate && !healBoards && !restoreComments) {
+            return 0;
+        }
         try {
-            int version = found;
-            while (version < CURRENT) {
-                migrate(version, config, defaults);
-                version++;
-                config.set("config-version", version);
+            if (migrate) {
+                int version = found;
+                while (version < CURRENT) {
+                    migrate(version, config, defaults);
+                    version++;
+                    config.set("config-version", version);
+                }
+            } else if (healBoards) {
+                to10(config, defaults);
             }
             int added = fillMissing(defaults, config, "");
-            backup(plugin, found);
-            config.options().copyHeader(true);
-            config.options().header(
-                    "Converted automatically from config-version " + found + " to " + CURRENT + ".\n"
-                            + "Do not change config-version.\n"
-                            + "The previous file is config.yml.v" + found + ".bak.\n"
-                            + "Comments from that file are not copied. The default config inside the jar explains each key."
-            );
-            plugin.saveConfig();
-            plugin.getLogger().info("Converted config.yml from version " + found + " to " + CURRENT
-                    + " (" + added + " new keys). Existing values were kept. Backup: config.yml.v" + found + ".bak");
+            String backupName = migrate ? "config.yml.v" + found + ".bak" : "config.yml.comments.bak";
+            backup(plugin, backupName);
+            String merged = ConfigLayout.merge(template, config);
+            Files.writeString(file.toPath(), merged, StandardCharsets.UTF_8);
+            plugin.reloadConfig();
+            if (migrate) {
+                plugin.getLogger().info("Converted config.yml from version " + found + " to " + CURRENT
+                        + " (" + added + " new keys). Existing values were kept. Backup: " + backupName);
+            } else if (healBoards) {
+                plugin.getLogger().info("Updated the scoreboard lines from the previous per-line keys. Backup: " + backupName);
+            } else {
+                plugin.getLogger().info("Restored the notes in config.yml. Your values were kept. Backup: " + backupName);
+            }
             return added;
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | IOException ex) {
             plugin.getLogger().log(Level.SEVERE, "Config conversion from version " + found + " failed. The file on disk was not replaced.", ex);
             plugin.reloadConfig();
             return 0;
@@ -84,6 +111,7 @@ public final class ConfigUpdater {
             case 8 -> {
                 // Gamemode blocks saved as "classic: {}" are filled from the jar after this step.
             }
+            case 9 -> to10(config, defaults);
             default -> {
                 // A gap still moves forward. Missing keys are filled after the last step.
             }
@@ -170,85 +198,47 @@ public final class ConfigUpdater {
      * {@code board-start} and {@code board-start-waiting} stay; {@code {start}} picks between them.
      */
     private static void to8(FileConfiguration config) {
-        String pad = line(config, "board-pad", "&8");
-        String ip = line(config, "board-ip", "&e{ip}");
-        String titleLobby = line(config, "board-title-lobby", "&6&lPILLARS");
-        String titleStart = line(config, "board-title-starting", "&6&lSTARTING");
-        String titleEnd = line(config, "board-title-finished", "&6&lFINISHED");
-        String titleLive = line(config, "board-title-fortune", "&6&lFORTUNE");
-        String arena = withToken(line(config, "board-arena", "&fArena: &e{value}"), "value", "id");
-        String alive = withToken(line(config, "board-alive", "&fAlive: &e{value}"), "value", "alive");
-        String kills = withToken(line(config, "board-kills", "&fKills: &e{value}"), "value", "session_kills");
-        setLayout(config, "board-lobby", String.join("\n",
-                titleLobby,
-                line(config, "board-join", "&6/pof join"),
-                withToken(line(config, "board-wins", "&fWins: &e{value}"), "value", "wins"),
-                withToken(line(config, "board-kills", "&fKills: &e{value}"), "value", "kills"),
-                withToken(line(config, "board-streak", "&fStreak: &e{value}"), "value", "streak"),
-                pad,
-                ip));
-        setLayout(config, "board-queued", String.join("\n",
-                titleLobby,
-                "{start}",
-                withToken(line(config, "board-queue", "&fQueue: &e{count}&7/&f{max}"), "count", "queue"),
-                pad,
-                ip));
-        setLayout(config, "board-starting", String.join("\n",
-                titleStart,
-                arena,
-                withToken(line(config, "board-starts", "&fStarts: &e{value}s"), "value", "starts"),
-                alive,
-                pad,
-                ip));
-        setLayout(config, "board-grace", String.join("\n",
-                titleLive,
-                arena,
-                alive,
-                kills,
-                withToken(line(config, "board-item", "&fItem: &e{value}s"), "value", "item"),
-                withToken(line(config, "board-time", "&fTime: &e{value}s"), "value", "time"),
-                withToken(line(config, "board-grace", "&aGrace: &f{value}s"), "value", "grace"),
-                pad,
-                ip));
-        setLayout(config, "board-ingame", String.join("\n",
-                titleLive,
-                arena,
-                alive,
-                kills,
-                withToken(line(config, "board-item", "&fItem: &e{value}s"), "value", "item"),
-                withToken(line(config, "board-time", "&fTime: &e{value}s"), "value", "time"),
-                pad,
-                ip));
-        setLayout(config, "board-ending", String.join("\n",
-                titleEnd,
-                arena,
-                alive,
-                kills,
-                pad,
-                ip));
-        for (String old : new String[]{
-                "board-title-lobby", "board-title-starting", "board-title-finished", "board-title-fortune",
-                "board-join", "board-wins", "board-kills", "board-streak", "board-queue",
-                "board-arena", "board-starts", "board-alive", "board-item", "board-time", "board-grace",
-                "board-pad", "board-ip"
-        }) {
+        java.util.function.Function<String, String> read = reader(config);
+        for (String mode : BoardLayouts.MODES) {
+            setLayout(config, "board-" + mode, BoardLayouts.compose(mode, read));
+        }
+    }
+
+    /**
+     * Writes the six sidebar layouts from the old per-line keys when those keys are still present.
+     * A layout the user already edited is left as they saved it. The per-line keys are then removed.
+     */
+    private static void to10(FileConfiguration config, YamlConfiguration defaults) {
+        java.util.function.Function<String, String> read = reader(config);
+        if (!BoardLayouts.hasLegacy(read)) {
+            return;
+        }
+        for (String mode : BoardLayouts.MODES) {
+            String path = "messages.board-" + mode;
+            String current = own(config, path) ? config.getString(path) : null;
+            String shipped = defaults.getString(path);
+            if (current == null || current.isBlank() || BoardLayouts.same(current, shipped) || BoardLayouts.same(current, BoardLayouts.builtin(mode))) {
+                config.set(path, BoardLayouts.compose(mode, read));
+            }
+        }
+        for (String old : BoardLayouts.LEGACY) {
             config.set("messages." + old, null);
         }
     }
 
+    private static java.util.function.Function<String, String> reader(FileConfiguration config) {
+        return key -> own(config, "messages." + key) ? config.getString("messages." + key) : null;
+    }
+
     private static void setLayout(FileConfiguration config, String key, String layout) {
-        if (!config.contains("messages." + key)) {
+        if (!own(config, "messages." + key)) {
             config.set("messages." + key, layout);
         }
     }
 
-    private static String line(FileConfiguration config, String key, String fallback) {
-        String value = config.getString("messages." + key);
-        return value == null ? fallback : value;
-    }
-
-    private static String withToken(String text, String from, String to) {
-        return text.replace("{" + from + "}", "{" + to + "}");
+    /** Runs one migration step. Tests use this to check a single version. */
+    static void step(int from, FileConfiguration config, YamlConfiguration defaults) {
+        migrate(from, config, defaults);
     }
 
     private static void replaceIf(FileConfiguration config, String path, String from, String to) {
@@ -258,7 +248,7 @@ public final class ConfigUpdater {
     }
 
     private static void move(FileConfiguration config, String from, String to) {
-        if (!config.contains(from) || config.contains(to)) {
+        if (!own(config, from) || own(config, to)) {
             return;
         }
         config.set(to, config.get(from));
@@ -266,7 +256,7 @@ public final class ConfigUpdater {
     }
 
     private static void ensure(FileConfiguration config, YamlConfiguration defaults, String path) {
-        if (!config.contains(path) && defaults.contains(path)) {
+        if (!own(config, path) && defaults.contains(path)) {
             copy(config, path, defaults.get(path));
         }
     }
@@ -275,6 +265,25 @@ public final class ConfigUpdater {
         if (defaults.contains(path)) {
             copy(config, path, defaults.get(path));
         }
+    }
+
+    /**
+     * True when {@code path} is stored in this file. Jar defaults do not count.
+     * {@code contains} is true for every key the jar ships, even when the file never set it.
+     */
+    static boolean own(ConfigurationSection section, String path) {
+        if (section == null || path == null || path.isEmpty()) {
+            return false;
+        }
+        String[] parts = path.split("\\.");
+        ConfigurationSection current = section;
+        for (int i = 0; i < parts.length - 1; i++) {
+            if (current == null || !current.getKeys(false).contains(parts[i])) {
+                return false;
+            }
+            current = current.getConfigurationSection(parts[i]);
+        }
+        return current != null && current.getKeys(false).contains(parts[parts.length - 1]);
     }
 
     /**
@@ -300,13 +309,16 @@ public final class ConfigUpdater {
             String path = prefix.isEmpty() ? key : prefix + "." + key;
             ConfigurationSection child = defaults.getConfigurationSection(key);
             if (child != null) {
-                if (!config.isConfigurationSection(path)) {
+                if (!own(config, path) || !config.isConfigurationSection(path)) {
+                    copy(config, path, child);
+                    added++;
+                } else if (config.getConfigurationSection(path).getKeys(false).isEmpty()) {
                     copy(config, path, child);
                     added++;
                 } else {
                     added += fillMissing(child, config, path);
                 }
-            } else if (!config.contains(path)) {
+            } else if (!own(config, path)) {
                 copy(config, path, defaults.get(key));
                 added++;
             }
@@ -314,25 +326,34 @@ public final class ConfigUpdater {
         return added;
     }
 
-    private static YamlConfiguration defaults(JavaPlugin plugin) {
+    private static byte[] resource(JavaPlugin plugin) {
         try (InputStream in = plugin.getResource("config.yml")) {
             if (in == null) {
                 plugin.getLogger().severe("The jar is missing config.yml, so the old config was not converted.");
                 return null;
             }
-            return YamlConfiguration.loadConfiguration(in);
+            return in.readAllBytes();
         } catch (IOException ex) {
             plugin.getLogger().log(Level.SEVERE, "Could not read the default config.yml", ex);
             return null;
         }
     }
 
-    private static void backup(JavaPlugin plugin, int from) {
+    private static YamlConfiguration defaults(byte[] raw, JavaPlugin plugin) {
+        try (Reader reader = new InputStreamReader(new ByteArrayInputStream(raw), StandardCharsets.UTF_8)) {
+            return YamlConfiguration.loadConfiguration(reader);
+        } catch (IOException ex) {
+            plugin.getLogger().log(Level.SEVERE, "Could not read the default config.yml", ex);
+            return null;
+        }
+    }
+
+    private static void backup(JavaPlugin plugin, String name) {
         File current = new File(plugin.getDataFolder(), "config.yml");
         if (!current.isFile()) {
             return;
         }
-        File copy = new File(plugin.getDataFolder(), "config.yml.v" + from + ".bak");
+        File copy = new File(plugin.getDataFolder(), name);
         try {
             Files.copy(current.toPath(), copy.toPath(), StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException ex) {

@@ -76,9 +76,9 @@ public final class PoFPlugin extends JavaPlugin {
         arenas = new Arenas(this, pillars);
         arenas.createAll(settings.arenaCount());
         resets = new ResetQueue(this, pillars);
-        for (var arena : arenas.all()) {
-            resets.enqueue(arena);
-        }
+        // Arenas were just (re)built by create() and start WAITING. Resetting every arena on
+        // enable left them all RESETTING for minutes on a fresh void world, so no arena was ever
+        // free: the queue and VIP /pof start looked stalled. Resets now only run after a match.
         items = new Items(this);
         fireballs = new Fireballs(this);
         boards = new Boards(this);
@@ -153,6 +153,9 @@ public final class PoFPlugin extends JavaPlugin {
             restart = true;
         }
         game.refreshTop();
+        if (boards != null) {
+            boards.refreshAll();
+        }
         return restart;
     }
 

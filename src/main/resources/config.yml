@@ -4,7 +4,7 @@
 # config-version is how far this file has been upgraded.
 # DO NOT CHANGE config-version. On startup and /pof reload the plugin walks an older
 # number forward to this jar's version, keeps your values, and writes config.yml.vN.bak first.
-config-version: 9
+config-version: 10
 
 # Chat prefix placed in front of plugin messages. Use & color codes.
 prefix: "&8[&6PoF&8]&r"
@@ -30,11 +30,13 @@ arenas:
   # world-per-arena: unload that arena's own void world, delete it, and create a fresh one.
   reset-mode: region
   # How many blocks to edit each tick while clearing, so the server does not freeze.
-  reset-blocks-per-tick: 8000
+  # Higher finishes a reset sooner. 20000 clears a full arena in a few seconds on a 20 TPS server.
+  reset-blocks-per-tick: 20000
   # Horizontal reach of a reset, measured from the arena center.
   # The plugin also makes sure this is larger than the build radius, border, and clear radius.
-  # The wipe always runs from the bottom of the world (Y=0) to the top, not only around the pillars.
-  reset-radius: 128
+  # The wipe runs from the bottom of the world (Y=0) up to just above max-build-y and the pillars,
+  # never the whole world height, so it stays quick.
+  reset-radius: 96
 
 pillars:
   # How many bedrock pillars to build. Players are capped at this number as well.
@@ -245,6 +247,7 @@ messages:
   debug-on: "&7Debug &aON"
   debug-off: "&7Debug &cOFF"
   debug-line: "&8debug {message}"
+  debug-unknown: "&cUnknown debug topic. Use: on, off, arenas, queue, world, storage, config."
   player-not-found: "&cPlayer not found."
   stats-header: "&6{player} &7career stats"
   stats-line1: "&e{wins} &7wins  &e{kills} &7kills  &e{deaths} &7deaths"
@@ -301,14 +304,9 @@ messages:
   storage-failed: "&cStorage reconnect failed. The previous database is still in use."
   chat-alive: "&8[&6PoF&8] {luckperms_prefix}&f{player}&8: &7{message}"
   chat-spec: "&8[&7SPEC&8] {luckperms_prefix}&8{player}&8: &7{message}"
-  # \n starts a new line. Header and footer need ProtocolLib on 1.8.8.
-  # Lobby: {ip} {queue} {max} {online}
-  tab-header-lobby: "&6&lPILLARS OF FORTUNE\n&8&m          &r &7{ip} &8&m          "
-  tab-footer-lobby: "&7Queue &f{queue}&7/&f{max} &8| &7Lobby &f{online}\n&eGold &7queued &8- &7Gray lobby"
-  # Arena: {id} {state} {alive} {time} {ip} {online}. {state} is already colored.
-  tab-header-arena: "&6&lPILLARS OF FORTUNE\n&7Arena &f{id} &8- {state}"
-  tab-footer-arena: "&a{alive} &7alive &8| &f{time}\n&7{ip}"
-  # Sidebar, same idea as the tab header: \n starts a new line, top to bottom.
+  # The tab list is automatic. Each viewer sees only the players in their own arena, or only the
+  # lobby when they are idle. There is no tab header, footer, name colour, or team ordering.
+  # Sidebar: \n starts a new line, top to bottom.
   # The first line is the title (32 characters). Each line under it is 32 characters. At most 15 of those.
   # A blank line leaves a gap. {luckperms_prefix}, {luckperms_suffix}, and %placeholder% use the viewer.
   # Every mode: {ip} {wins} {kills} {deaths} {streak} {best} {games} {items} {mins} {queue} {max} {mode}

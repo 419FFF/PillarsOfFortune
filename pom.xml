@@ -6,7 +6,7 @@
 
     <groupId>com.slop</groupId>
     <artifactId>PillarsOfFortune</artifactId>
-    <version>1.0.3</version>
+    <version>1.0.4</version>
     <packaging>jar</packaging>
 
     <name>PillarsOfFortune</name>
@@ -80,6 +80,24 @@
 
     <build>
         <finalName>PillarsOfFortune-${project.version}</finalName>
+        <resources>
+            <!-- Only plugin.yml is filtered, so ${project.version} is injected and the version
+                 can never drift from pom.xml again. Everything else is copied untouched. -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>plugin.yml</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>plugin.yml</exclude>
+                </excludes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

@@ -18,9 +18,11 @@ import com.slop.pof.util.Text;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -35,6 +37,7 @@ public final class Game {
     private final Map<String, List<UUID>> queues = new LinkedHashMap<>();
     private final Map<String, Integer> timers = new HashMap<>();
     private final Map<UUID, String> queuedMode = new HashMap<>();
+    private final Set<String> arenasBusy = new HashSet<>();
     private List<TopEntry> top = List.of();
     private boolean topReady;
 
@@ -106,6 +109,43 @@ public final class Game {
             return false;
         }
         return queueSize(modeId) < mode.minPlayers(plugin.settings());
+    }
+
+    public boolean arenasBusy(UUID uuid) {
+        String modeId = queuedMode.get(uuid);
+        return modeId != null && arenasBusy.contains(modeId);
+    }
+
+    /** One line of queue, timer, and arena state for /pof debug. */
+    public String debugStatus() {
+        StringBuilder text = new StringBuilder();
+        text.append("queues=");
+        boolean any = false;
+        for (Gamemode mode : plugin.settings().enabledGamemodes()) {
+            int size = queueSize(mode.id);
+            Integer timer = timers.get(mode.id);
+            if (size == 0 && timer == null && !arenasBusy.contains(mode.id)) {
+                continue;
+            }
+            if (any) {
+                text.append(", ");
+            }
+            any = true;
+            text.append(mode.id).append(':').append(size);
+            if (timer != null) {
+                text.append(" timer=").append(timer);
+            }
+            if (arenasBusy.contains(mode.id)) {
+                text.append(" busy");
+            }
+        }
+        if (!any) {
+            text.append("none");
+        }
+        Arena free = plugin.arenas().free();
+        text.append(" free=").append(free == null ? "none" : free.id);
+        text.append(' ').append(plugin.arenas().describe());
+        return text.toString();
     }
 
     public List<TopEntry> top() {
@@ -310,6 +350,18 @@ public final class Game {
         if (timer == null) {
             timer = mode.queueSeconds(settings);
         }
+        Arena free = plugin.arenas().free();
+        if (plugin.isDebug()) {
+            plugin.getLogger().info("VIP " + mode.id + " timer " + timer + " free " + (free == null ? "none" : free.id));
+        }
+        if (free == null) {
+            arenasBusy.add(mode.id);
+            if (actor != null) {
+                say(actor, "arenas-busy");
+            }
+            return false;
+        }
+        arenasBusy.remove(mode.id);
         if (timer > VIP_TIMER_SECONDS) {
             timers.put(mode.id, VIP_TIMER_SECONDS);
             for (UUID uuid : queue(mode.id)) {
@@ -386,6 +438,7 @@ public final class Game {
         queues.clear();
         timers.clear();
         queuedMode.clear();
+        arenasBusy.clear();
     }
 
     public void regen() {
@@ -551,11 +604,13 @@ public final class Game {
         int min = mode.minPlayers(settings);
         if (waiting.size() < min) {
             timers.remove(mode.id);
+            arenasBusy.remove(mode.id);
             return;
         }
         Integer timer = timers.get(mode.id);
         if (timer == null) {
             timers.put(mode.id, mode.queueSeconds(settings));
+            arenasBusy.remove(mode.id);
             for (UUID uuid : waiting) {
                 Player player = Bukkit.getPlayer(uuid);
                 if (player != null) {
@@ -569,9 +624,21 @@ public final class Game {
         if (timer <= 0) {
             Arena arena = plugin.arenas().free();
             if (arena == null) {
-                timers.put(mode.id, VIP_TIMER_SECONDS);
+                timers.put(mode.id, 1);
+                if (arenasBusy.add(mode.id)) {
+                    for (UUID uuid : waiting) {
+                        Player player = Bukkit.getPlayer(uuid);
+                        if (player != null) {
+                            say(player, "arenas-busy");
+                        }
+                    }
+                }
+                if (plugin.isDebug()) {
+                    plugin.getLogger().info("Queue " + mode.id + " is ready and every arena is busy. " + debugStatus());
+                }
                 return;
             }
+            arenasBusy.remove(mode.id);
             int cap = Math.min(mode.maxPlayers(settings), settings.pillarCount());
             List<UUID> batch = new ArrayList<>();
             for (UUID uuid : waiting) {
@@ -699,6 +766,9 @@ public final class Game {
         int countdown = mode == null ? settings.countdown() : mode.countdown(settings);
         arena.state = Arena.State.STARTING;
         arena.count = countdown;
+        if (plugin.isDebug()) {
+            plugin.getLogger().info("Match starting in arena " + arena.id + " (" + arena.gamemodeId + "). " + debugStatus());
+        }
         plugin.pillars().build(arena);
         int players = arena.players.size();
         int pillarCount = arena.pillars.size();
@@ -795,7 +865,6 @@ public final class Game {
             name = winnerPlayer.getName();
             Text.title(winnerPlayer, settings.text("title-victory"), settings.text("subtitle-victory"), 5);
             Text.sound(winnerPlayer, settings.sound("victory", "random.levelup"), 1f, 1f);
-            winnerPlayer.setPlayerListName(trimList(org.bukkit.ChatColor.GOLD + winnerPlayer.getName()));
         }
         arenaMessage(arena, winnerPlayer, "won", "player", name);
         for (UUID uuid : arena.players) {
@@ -889,10 +958,6 @@ public final class Game {
         }
         Stats stats = plugin.database().get(uuid);
         return stats == null ? "unknown" : stats.name;
-    }
-
-    private static String trimList(String colored) {
-        return colored.length() <= 16 ? colored : colored.substring(0, 16);
     }
 
     private static void clearInventory(Player player) {

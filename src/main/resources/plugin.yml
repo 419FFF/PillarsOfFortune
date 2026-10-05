@@ -1,6 +1,6 @@
 # Pillars of Fortune plugin description. Bukkit reads this file. Do not rename the keys.
 name: PillarsOfFortune
-version: 1.0.0
+version: ${project.version}
 # Java entry point. Must match the class in the jar.
 main: com.slop.pof.PoFPlugin
 author: example.com

@@ -84,7 +84,7 @@ public final class ResetQueue {
         minZ = active.centerZ - radius;
         maxZ = active.centerZ + radius;
         minY = 0;
-        maxY = world.getMaxHeight() - 1;
+        maxY = resetTop(world);
         int cx0 = minX >> 4;
         int cx1 = maxX >> 4;
         int cz0 = minZ >> 4;
@@ -97,6 +97,18 @@ public final class ResetQueue {
         x = minX;
         y = minY;
         z = minZ;
+    }
+
+    /**
+     * Highest Y a reset needs to clear. Players cannot build above max-build-y and pillars stop at
+     * pillarY, so clearing the whole world height (0..255) was wasted work that made each reset
+     * take minutes. This caps the wipe just above the tallest thing a match can create.
+     */
+    private int resetTop(World world) {
+        int ceiling = Math.max(plugin.settings().maxBuildY(),
+                plugin.settings().pillarY() + plugin.settings().pillarHeight());
+        ceiling = Math.max(ceiling, plugin.settings().pillarY() + 8);
+        return Math.min(world.getMaxHeight() - 1, ceiling + 8);
     }
 
     private void stepRegion() {

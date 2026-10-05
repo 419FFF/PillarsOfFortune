@@ -48,7 +48,7 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
             case "setlobby" -> setLobby(sender);
             case "regen" -> regen(sender);
             case "arenas" -> arenas(sender);
-            case "debug" -> debug(sender);
+            case "debug" -> debug(sender, args);
             case "reload" -> reload(sender);
             default -> tell(sender, "unknown");
         }
@@ -250,13 +250,76 @@ public final class PofCommand implements CommandExecutor, TabCompleter {
         }
     }
 
-    private void debug(CommandSender sender) {
+    /**
+     * {@code /pof debug} toggles verbose logging; {@code /pof debug <topic>} prints a snapshot.
+     * Topics: on, off, arenas, queue, world, storage, config.
+     */
+    private void debug(CommandSender sender, String[] args) {
         if (!sender.hasPermission(Perms.ADMIN)) {
             tell(sender, "no-permission");
             return;
         }
-        plugin.setDebug(!plugin.isDebug());
-        tell(sender, plugin.isDebug() ? "debug-on" : "debug-off");
+        if (args.length < 2) {
+            plugin.setDebug(!plugin.isDebug());
+            tell(sender, plugin.isDebug() ? "debug-on" : "debug-off");
+            return;
+        }
+        switch (args[1].toLowerCase(Locale.ROOT)) {
+            case "on" -> {
+                plugin.setDebug(true);
+                tell(sender, "debug-on");
+            }
+            case "off" -> {
+                plugin.setDebug(false);
+                tell(sender, "debug-off");
+            }
+            case "arenas", "list" -> debugArenas(sender);
+            case "queue", "state" -> debugLine(sender, plugin.game().debugStatus());
+            case "world", "worlds" -> debugLine(sender, worldsLine());
+            case "storage", "db" -> debugLine(sender, storageLine());
+            case "config" -> debugLine(sender, configLine());
+            default -> {
+                tell(sender, "debug-unknown");
+                debugLine(sender, "on | off | arenas | queue | world | storage | config");
+            }
+        }
+    }
+
+    private void debugArenas(CommandSender sender) {
+        debugLine(sender, "arenas=" + plugin.arenas().size()
+                + " waiting=" + plugin.arenas().waitingCount());
+        for (Arena arena : plugin.arenas().all()) {
+            debugLine(sender, "#" + arena.id + " " + arena.state
+                    + " world=" + (arena.world == null ? "?" : arena.world.getName())
+                    + " center=" + arena.centerX + "," + arena.centerZ
+                    + " players=" + arena.players.size()
+                    + " alive=" + arena.aliveCount()
+                    + " mode=" + (arena.gamemodeId == null ? "-" : arena.gamemodeId)
+                    + " pillars=" + arena.pillars.size());
+        }
+    }
+
+    private void debugLine(CommandSender sender, String message) {
+        tell(sender, "debug-line", "message", message);
+    }
+
+    private String worldsLine() {
+        Settings settings = plugin.settings();
+        return "lobby=" + settings.lobbyWorld() + " game=" + settings.gameWorld()
+                + " per-arena=" + plugin.worlds().perArena();
+    }
+
+    private String storageLine() {
+        Settings settings = plugin.settings();
+        return "storage=" + settings.storageType() + " fingerprint=" + settings.storageFingerprint();
+    }
+
+    private String configLine() {
+        Settings settings = plugin.settings();
+        return "arenas=" + settings.arenaCount() + " pillars=" + settings.pillarCount()
+                + " reset-mode=" + settings.resetMode()
+                + " reset-blocks-per-tick=" + settings.resetBlocksPerTick()
+                + " min-players=" + settings.minPlayers() + " max-players=" + settings.maxPlayers();
     }
 
     private void reload(CommandSender sender) {
