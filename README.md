@@ -2,6 +2,8 @@
 
 A Pillars of Fortune minigame plugin for **Spigot / Paper 1.8.8**, built for servers running **Java 17**.
 
+Used Grok Build 4.7 (high), Deepseek 4.1 Flash (medium), along with some prompt assistance from Grok 4.6 (Fast).
+
 Players are placed onto bedrock pillars in a void world, gear up over the course of a round, and fight
 until one winner remains. Almost everything — arena layout, item pools, timings, leveling, messages and
 leaderboards — is configurable in `config.yml`.
